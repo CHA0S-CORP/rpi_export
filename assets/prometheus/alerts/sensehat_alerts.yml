@@ -1,0 +1,165 @@
+groups:
+  - name: sensehat_environmental
+    rules:
+      # Temperature alerts (using Fahrenheit as per the exporter)
+      - alert: SenseHatHighTemperature
+        expr: sensehat_temperature_adjusted_fahrenheit > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High ambient temperature on {{ $labels.instance }}"
+          description: "Adjusted temperature is {{ $value | printf \"%.1f\" }}°F ({{ $value | printf \"%.1f\" | float64 | subtract 32 | multiply 0.5556 | printf \"%.1f\" }}°C)"
+
+      - alert: SenseHatLowTemperature
+        expr: sensehat_temperature_adjusted_fahrenheit < 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low ambient temperature on {{ $labels.instance }}"
+          description: "Adjusted temperature is {{ $value | printf \"%.1f\" }}°F"
+
+      - alert: SenseHatFreezingTemperature
+        expr: sensehat_temperature_adjusted_fahrenheit < 32
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Freezing temperature on {{ $labels.instance }}"
+          description: "Temperature is {{ $value | printf \"%.1f\" }}°F - below freezing!"
+
+      # Humidity alerts
+      - alert: SenseHatHighHumidity
+        expr: sensehat_humidity_percent > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High humidity on {{ $labels.instance }}"
+          description: "Relative humidity is {{ $value | printf \"%.1f\" }}%"
+
+      - alert: SenseHatLowHumidity
+        expr: sensehat_humidity_percent < 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low humidity on {{ $labels.instance }}"
+          description: "Relative humidity is {{ $value | printf \"%.1f\" }}%"
+
+      - alert: SenseHatCriticalHumidity
+        expr: sensehat_humidity_percent > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical humidity on {{ $labels.instance }}"
+          description: "Relative humidity is {{ $value | printf \"%.1f\" }}% - condensation risk"
+
+      # Pressure alerts
+      - alert: SenseHatLowPressure
+        expr: sensehat_pressure_millibars < 980
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low atmospheric pressure on {{ $labels.instance }}"
+          description: "Pressure is {{ $value | printf \"%.1f\" }} mbar - possible storm approaching"
+
+      - alert: SenseHatHighPressure
+        expr: sensehat_pressure_millibars > 1040
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "High atmospheric pressure on {{ $labels.instance }}"
+          description: "Pressure is {{ $value | printf \"%.1f\" }} mbar"
+
+      - alert: SenseHatRapidPressureChange
+        expr: |
+          abs(
+            sensehat_pressure_millibars
+            -
+            sensehat_pressure_millibars offset 1h
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rapid pressure change on {{ $labels.instance }}"
+          description: "Pressure changed by more than 10 mbar in the last hour"
+
+  - name: sensehat_motion
+    rules:
+      # Movement detection
+      - alert: SenseHatMotionDetected
+        expr: |
+          sqrt(
+            pow(sensehat_accelerometer_x_g, 2) +
+            pow(sensehat_accelerometer_y_g, 2) +
+            pow(sensehat_accelerometer_z_g, 2)
+          ) > 1.5
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "Motion detected on {{ $labels.instance }}"
+          description: "Accelerometer reading indicates movement or vibration"
+
+      - alert: SenseHatSignificantTilt
+        expr: |
+          abs(sensehat_orientation_pitch_degrees) > 45
+          or
+          abs(sensehat_orientation_roll_degrees) > 45
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Device tilted on {{ $labels.instance }}"
+          description: "Pitch: {{ $value }}° - device may have fallen or been moved"
+
+      - alert: SenseHatGyroscopeActive
+        expr: |
+          abs(sensehat_gyroscope_x_dps) > 10
+          or
+          abs(sensehat_gyroscope_y_dps) > 10
+          or
+          abs(sensehat_gyroscope_z_dps) > 10
+        for: 30s
+        labels:
+          severity: info
+        annotations:
+          summary: "Rotation detected on {{ $labels.instance }}"
+          description: "Gyroscope indicates the device is rotating"
+
+  - name: sensehat_calibration
+    rules:
+      - alert: SenseHatIMUNotCalibrated
+        expr: sensehat_imu_calibrated == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "IMU not calibrated on {{ $labels.instance }}"
+          description: "The IMU sensors are not calibrated - orientation readings may be inaccurate"
+
+  - name: sensehat_color_sensor
+    rules:
+      - alert: SenseHatLowLight
+        expr: sensehat_color_clear < 10
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low light detected on {{ $labels.instance }}"
+          description: "Ambient light level is very low (clear channel: {{ $value }})"
+
+      - alert: SenseHatBrightLight
+        expr: sensehat_color_clear > 240
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Bright light detected on {{ $labels.instance }}"
+          description: "Ambient light level is very high (clear channel: {{ $value }})"

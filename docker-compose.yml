@@ -1,24 +1,8 @@
 services:
-  rpi-exporter:
-    build: .
-    container_name: rpi-exporter
-    restart: unless-stopped
-    ports:
-      - "9110:9110"
-    devices:
-      # VideoCore mailbox interface (required)
-      - /dev/vcio:/dev/vcio
-      # I2C bus for Sense HAT (only needed with -sensehat flag)
-      - /dev/i2c-1:/dev/i2c-1
-    # Uncomment and add joystick device if needed:
-    # - /dev/input/event0:/dev/input/event0
-    command: ["-addr=:9110"]
-    # To enable Sense HAT metrics:
-    # command: ["-addr=:9110", "-sensehat"]
-
   # Alternative: Sense HAT enabled by default
   rpi-exporter-sensehat:
     build: .
+    image: ghcr.io/cha0s-corp/rpi-exporter:latest
     container_name: rpi-exporter-sensehat
     restart: unless-stopped
     ports:
@@ -26,6 +10,7 @@ services:
     devices:
       - /dev/vcio:/dev/vcio
       - /dev/i2c-1:/dev/i2c-1
+      - /dev/input/event0:/dev/input/event0
     command: ["-addr=:9110", "-sensehat"]
     profiles:
       - sensehat

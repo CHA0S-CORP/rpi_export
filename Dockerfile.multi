@@ -1,0 +1,13 @@
+FROM debian:bookworm-slim
+
+ARG TARGETARCH
+
+EXPOSE 9110
+
+WORKDIR /opt
+
+COPY binaries/${TARGETARCH}/rpi_exporter /opt/rpi_exporter
+RUN chmod +x /opt/rpi_exporter
+
+ENTRYPOINT ["/opt/rpi_exporter"]
+CMD ["-addr=:9110", "-sensehat"]

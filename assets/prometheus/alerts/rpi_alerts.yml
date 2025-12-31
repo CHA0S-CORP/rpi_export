@@ -1,0 +1,122 @@
+groups:
+  - name: rpi_hardware
+    rules:
+      # Temperature alerts
+      - alert: RpiHighTemperature
+        expr: rpi_temperature_c{id="soc"} > 70
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU temperature on {{ $labels.instance }}"
+          description: "Raspberry Pi SoC temperature is {{ $value | printf \"%.1f\" }}°C (threshold: 70°C)"
+
+      - alert: RpiCriticalTemperature
+        expr: rpi_temperature_c{id="soc"} > 80
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical CPU temperature on {{ $labels.instance }}"
+          description: "Raspberry Pi SoC temperature is {{ $value | printf \"%.1f\" }}°C - throttling likely active"
+
+      - alert: RpiTemperatureNearMax
+        expr: (rpi_temperature_c{id="soc"} / rpi_max_temperature_c{id="soc"}) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Temperature approaching maximum on {{ $labels.instance }}"
+          description: "SoC temperature is {{ $value | printf \"%.0f\" }}% of maximum safe temperature"
+
+      # Voltage alerts
+      - alert: RpiLowCoreVoltage
+        expr: rpi_voltage{id="core"} < 1.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low core voltage on {{ $labels.instance }}"
+          description: "Core voltage is {{ $value | printf \"%.3f\" }}V (expected ~1.2V)"
+
+      - alert: RpiUnderVoltage
+        expr: rpi_voltage{id="core"} < rpi_voltage_min{id="core"} * 1.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Under-voltage detected on {{ $labels.instance }}"
+          description: "Core voltage {{ $value | printf \"%.3f\" }}V is near minimum - check power supply"
+
+      # Clock rate alerts
+      - alert: RpiArmClockThrottled
+        expr: rpi_clock_rate_hz{id="arm"} < 1000000000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ARM clock throttled on {{ $labels.instance }}"
+          description: "ARM clock is running at {{ $value | humanize }}Hz - possible thermal throttling"
+
+      - alert: RpiClockRateDrop
+        expr: |
+          (
+            rpi_clock_rate_hz{id="arm"}
+            /
+            rpi_clock_rate_hz{id="arm"} offset 1h
+          ) < 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Significant clock rate drop on {{ $labels.instance }}"
+          description: "ARM clock dropped by more than 20% compared to 1 hour ago"
+
+      # Turbo mode
+      - alert: RpiTurboDisabled
+        expr: rpi_turbo == 0
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Turbo mode disabled on {{ $labels.instance }}"
+          description: "Turbo mode has been disabled for 30+ minutes"
+
+      # Exporter health
+      - alert: RpiExporterDown
+        expr: up{job="rpi_exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RPI exporter down on {{ $labels.instance }}"
+          description: "Cannot scrape metrics from {{ $labels.instance }}"
+
+      - alert: RpiExporterSlow
+        expr: scrape_duration_seconds{job="rpi_exporter"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RPI exporter slow on {{ $labels.instance }}"
+          description: "Scrape duration is {{ $value | printf \"%.1f\" }}s"
+
+  - name: rpi_power_state
+    rules:
+      - alert: RpiPowerDeviceMissing
+        expr: rpi_power_state == 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Power device missing on {{ $labels.instance }}"
+          description: "Power device {{ $labels.id }} reports as missing"
+
+      - alert: RpiPowerDeviceOff
+        expr: rpi_power_state{id=~"sd_card|usb_hcd"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical power device off on {{ $labels.instance }}"
+          description: "Power device {{ $labels.id }} is powered off"
