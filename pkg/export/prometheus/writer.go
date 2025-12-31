@@ -7,9 +7,18 @@ package prometheus
 import (
 	"fmt"
 	"io"
+	"sync/atomic"
+	"time"
 
 	"github.com/CHA0S-CORP/rpi_exporter/pkg/mbox"
 	"github.com/CHA0S-CORP/rpi_exporter/pkg/sensehat"
+)
+
+// Exporter metrics
+var (
+	scrapeCount        uint64
+	scrapeErrorCount   uint64
+	lastScrapeDuration float64
 )
 
 const (
@@ -82,8 +91,24 @@ type Config struct {
 
 // Write all metrics in Prometheus text-based exposition format.
 func Write(w io.Writer, cfg *Config) error {
+	start := time.Now()
+	atomic.AddUint64(&scrapeCount, 1)
+
 	ew := &expWriter{w: w}
-	return ew.write(cfg)
+	err := ew.write(cfg)
+
+	duration := time.Since(start).Seconds()
+	lastScrapeDuration = duration
+
+	if err != nil {
+		atomic.AddUint64(&scrapeErrorCount, 1)
+		return err
+	}
+
+	// Write exporter metrics
+	ew.writeExporterMetrics(duration)
+
+	return ew.err
 }
 
 func (w *expWriter) writeHeader(name, help, metricType string, labels ...string) {
@@ -477,4 +502,30 @@ func (w *expWriter) writeSenseHatMetrics(hat *sensehat.SenseHat) error {
 	}
 
 	return nil
+}
+
+func (w *expWriter) writeExporterMetrics(scrapeDuration float64) {
+	/*
+	 * Exporter metrics
+	 */
+	w.writeHeader(
+		"rpi_exporter_scrape_duration_seconds",
+		"Duration of the last scrape in seconds.",
+		metricTypeGauge,
+	)
+	w.writeSample(fmt.Sprintf("%.06f", scrapeDuration))
+
+	w.writeHeader(
+		"rpi_exporter_scrapes_total",
+		"Total number of scrapes.",
+		metricTypeCounter,
+	)
+	w.writeSample(atomic.LoadUint64(&scrapeCount))
+
+	w.writeHeader(
+		"rpi_exporter_scrape_errors_total",
+		"Total number of scrape errors.",
+		metricTypeCounter,
+	)
+	w.writeSample(atomic.LoadUint64(&scrapeErrorCount))
 }

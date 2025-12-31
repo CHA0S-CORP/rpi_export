@@ -11,6 +11,7 @@ package mbox
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"sync"
 	"unsafe"
@@ -95,7 +96,12 @@ func (t Tag) Value() []uint32 {
 	if !t.IsValid() {
 		return nil
 	}
-	return t[3 : 3+t.Len()/4]
+	// Round up to include partial words: (len + 3) / 4
+	words := (t.Len() + 3) / 4
+	if words == 0 {
+		return nil
+	}
+	return t[3 : 3+words]
 }
 
 func (t Tag) IsEnd() bool { return len(t) == 1 && t[0] == 0 }
@@ -142,7 +148,7 @@ type Mailbox struct {
 func Open() (f *Mailbox, err error) {
 	var ff *os.File
 	ff, err = os.OpenFile("/dev/vcio", os.O_RDONLY, os.ModePerm)
-	if err == os.ErrNotExist {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrNotImplemented
 	}
 	if err != nil {
@@ -168,8 +174,12 @@ func (m *Mailbox) Do(tagID uint32, bufferBytes int, args ...uint32) ([]Tag, erro
 
 	// Align buffer to 16-byte boundary
 	if m.buf == nil {
-		offset := uintptr(unsafe.Pointer(&m.bufUnaligned[0])) & 15
-		m.buf = m.bufUnaligned[16-offset : uintptr(len(m.bufUnaligned))-offset]
+		baseAddr := uintptr(unsafe.Pointer(&m.bufUnaligned[0]))
+		// Calculate how many bytes we need to skip to reach 16-byte alignment
+		// Each uint32 is 4 bytes, so we divide by 4 to get the offset in uint32 units
+		offsetBytes := (16 - (baseAddr & 15)) & 15
+		offsetWords := int(offsetBytes / 4)
+		m.buf = m.bufUnaligned[offsetWords : len(m.bufUnaligned)-offsetWords]
 	}
 
 	// Compute value buffer length (ensure 32-bit aligned)
@@ -325,7 +335,14 @@ func (m *Mailbox) GetPowerState(id PowerDeviceID) (PowerState, error) {
 	if err != nil {
 		return 0, err
 	}
-	return PowerState(tags[0].Value()[1] & 0x03), nil
+	if len(tags) == 0 {
+		return 0, fmt.Errorf("vcio: no tags returned for GetPowerState")
+	}
+	val := tags[0].Value()
+	if len(val) < 2 {
+		return 0, fmt.Errorf("vcio: value buffer too small for GetPowerState (got %d, need 2)", len(val))
+	}
+	return PowerState(val[1] & 0x03), nil
 }
 
 type ClockID uint32
@@ -422,5 +439,12 @@ func (m *Mailbox) GetTurbo() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return tags[0].Value()[1] == 1, nil
+	if len(tags) == 0 {
+		return false, fmt.Errorf("vcio: no tags returned for GetTurbo")
+	}
+	val := tags[0].Value()
+	if len(val) < 2 {
+		return false, fmt.Errorf("vcio: value buffer too small for GetTurbo (got %d, need 2)", len(val))
+	}
+	return val[1] == 1, nil
 }

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -57,6 +58,7 @@ type SenseHat struct {
 	joystickFile   *os.File
 	joystickEvents []JoystickEvent
 	joystickMu     sync.Mutex
+	joystickDone   chan struct{} // signals joystick goroutine to stop
 
 	// HTS221 calibration coefficients
 	h0RH, h1RH       float64
@@ -127,6 +129,10 @@ func New() (*SenseHat, error) {
 
 // Close releases all resources.
 func (s *SenseHat) Close() error {
+	// Signal joystick goroutine to stop
+	if s.joystickDone != nil {
+		close(s.joystickDone)
+	}
 	if s.joystickFile != nil {
 		s.joystickFile.Close()
 	}
@@ -191,32 +197,79 @@ func (s *SenseHat) initHTS221() error {
 	}
 
 	// Read calibration data
-	h0RH, _ := s.readReg(addrHTS221, 0x30)
-	h1RH, _ := s.readReg(addrHTS221, 0x31)
+	h0RH, err := s.readReg(addrHTS221, 0x30)
+	if err != nil {
+		return fmt.Errorf("failed to read H0_RH calibration: %w", err)
+	}
+	h1RH, err := s.readReg(addrHTS221, 0x31)
+	if err != nil {
+		return fmt.Errorf("failed to read H1_RH calibration: %w", err)
+	}
 	s.h0RH = float64(h0RH) / 2.0
 	s.h1RH = float64(h1RH) / 2.0
 
-	t0DegC, _ := s.readReg(addrHTS221, 0x32)
-	t1DegC, _ := s.readReg(addrHTS221, 0x33)
-	t1t0msb, _ := s.readReg(addrHTS221, 0x35)
+	t0DegC, err := s.readReg(addrHTS221, 0x32)
+	if err != nil {
+		return fmt.Errorf("failed to read T0_degC calibration: %w", err)
+	}
+	t1DegC, err := s.readReg(addrHTS221, 0x33)
+	if err != nil {
+		return fmt.Errorf("failed to read T1_degC calibration: %w", err)
+	}
+	t1t0msb, err := s.readReg(addrHTS221, 0x35)
+	if err != nil {
+		return fmt.Errorf("failed to read T1/T0 MSB calibration: %w", err)
+	}
 	s.t0DegC = float64(int(t0DegC)|((int(t1t0msb)&0x03)<<8)) / 8.0
 	s.t1DegC = float64(int(t1DegC)|((int(t1t0msb)&0x0C)<<6)) / 8.0
 
-	h0T0OutL, _ := s.readReg(addrHTS221, 0x36)
-	h0T0OutH, _ := s.readReg(addrHTS221, 0x37)
+	h0T0OutL, err := s.readReg(addrHTS221, 0x36)
+	if err != nil {
+		return fmt.Errorf("failed to read H0_T0_OUT_L calibration: %w", err)
+	}
+	h0T0OutH, err := s.readReg(addrHTS221, 0x37)
+	if err != nil {
+		return fmt.Errorf("failed to read H0_T0_OUT_H calibration: %w", err)
+	}
 	s.h0T0Out = int16(h0T0OutL) | int16(h0T0OutH)<<8
 
-	h1T0OutL, _ := s.readReg(addrHTS221, 0x3A)
-	h1T0OutH, _ := s.readReg(addrHTS221, 0x3B)
+	h1T0OutL, err := s.readReg(addrHTS221, 0x3A)
+	if err != nil {
+		return fmt.Errorf("failed to read H1_T0_OUT_L calibration: %w", err)
+	}
+	h1T0OutH, err := s.readReg(addrHTS221, 0x3B)
+	if err != nil {
+		return fmt.Errorf("failed to read H1_T0_OUT_H calibration: %w", err)
+	}
 	s.h1T0Out = int16(h1T0OutL) | int16(h1T0OutH)<<8
 
-	t0OutL, _ := s.readReg(addrHTS221, 0x3C)
-	t0OutH, _ := s.readReg(addrHTS221, 0x3D)
+	t0OutL, err := s.readReg(addrHTS221, 0x3C)
+	if err != nil {
+		return fmt.Errorf("failed to read T0_OUT_L calibration: %w", err)
+	}
+	t0OutH, err := s.readReg(addrHTS221, 0x3D)
+	if err != nil {
+		return fmt.Errorf("failed to read T0_OUT_H calibration: %w", err)
+	}
 	s.t0Out = int16(t0OutL) | int16(t0OutH)<<8
 
-	t1OutL, _ := s.readReg(addrHTS221, 0x3E)
-	t1OutH, _ := s.readReg(addrHTS221, 0x3F)
+	t1OutL, err := s.readReg(addrHTS221, 0x3E)
+	if err != nil {
+		return fmt.Errorf("failed to read T1_OUT_L calibration: %w", err)
+	}
+	t1OutH, err := s.readReg(addrHTS221, 0x3F)
+	if err != nil {
+		return fmt.Errorf("failed to read T1_OUT_H calibration: %w", err)
+	}
 	s.t1Out = int16(t1OutL) | int16(t1OutH)<<8
+
+	// Validate calibration coefficients to prevent division by zero
+	if s.t1Out == s.t0Out {
+		return fmt.Errorf("invalid temperature calibration: t1Out == t0Out")
+	}
+	if s.h1T0Out == s.h0T0Out {
+		return fmt.Errorf("invalid humidity calibration: h1T0Out == h0T0Out")
+	}
 
 	return nil
 }
@@ -293,6 +346,7 @@ func (s *SenseHat) initJoystick() {
 	for _, path := range paths {
 		if f, err := os.Open(path); err == nil {
 			s.joystickFile = f
+			s.joystickDone = make(chan struct{})
 			go s.readJoystickEvents()
 			break
 		}
@@ -302,9 +356,35 @@ func (s *SenseHat) initJoystick() {
 // readJoystickEvents reads joystick events in a goroutine.
 func (s *SenseHat) readJoystickEvents() {
 	buf := make([]byte, 24) // input_event structure size
+	backoff := time.Millisecond * 10
+	maxBackoff := time.Second * 5
+
 	for {
+		select {
+		case <-s.joystickDone:
+			return
+		default:
+		}
+
 		n, err := s.joystickFile.Read(buf)
-		if err != nil || n < 24 {
+		if err != nil {
+			// Check if we're shutting down
+			select {
+			case <-s.joystickDone:
+				return
+			default:
+			}
+			// Exponential backoff on errors to prevent CPU spin
+			time.Sleep(backoff)
+			if backoff < maxBackoff {
+				backoff *= 2
+			}
+			continue
+		}
+		// Reset backoff on successful read
+		backoff = time.Millisecond * 10
+
+		if n < 24 {
 			continue
 		}
 
@@ -545,13 +625,6 @@ func (s *SenseHat) ClearLEDs() error {
 	buf[0] = 0x00 // Register address
 	_, err := s.i2cFile.Write(buf)
 	return err
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // inputEvent represents a Linux input event structure for unsafe sizeof
