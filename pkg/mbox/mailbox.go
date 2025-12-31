@@ -15,7 +15,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/cavaliercoder/rpi_export/pkg/ioctl"
+	"github.com/CHA0S-CORP/rpi_exporter/pkg/ioctl"
 )
 
 const (
@@ -423,5 +423,4 @@ func (m *Mailbox) GetTurbo() (bool, error) {
 		return false, err
 	}
 	return tags[0].Value()[1] == 1, nil
-
 }
