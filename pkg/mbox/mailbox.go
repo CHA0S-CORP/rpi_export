@@ -1,11 +1,10 @@
 /*
-Package mbox implements the Mailbox protocol used to communicate between the the VideoCore GPU and
+Package mbox implements the Mailbox protocol used to communicate between the VideoCore GPU and
 ARM processor on a Raspberry Pi.
 
-https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface
+Supports Raspberry Pi 1 through Raspberry Pi 5.
 
-TODO: Thread safety
-TODO: Account for different channels. Maybe in constructor?
+https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface
 */
 package mbox
 
@@ -13,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"unsafe"
 
 	"github.com/cavaliercoder/rpi_export/pkg/ioctl"
@@ -90,7 +90,7 @@ func (t Tag) IsResponse() bool {
 	return t[2]&0x80000000 == 0x80000000
 }
 
-// Value returns the value buffer. TODO: Always 32bit.
+// Value returns the value buffer as 32-bit words.
 func (t Tag) Value() []uint32 {
 	if !t.IsValid() {
 		return nil
@@ -124,7 +124,7 @@ func ReadTag(b []uint32) (Tag, error) {
 	if len(b) < 3 {
 		return nil, fmt.Errorf("vcio: tag buffer is too small")
 	}
-	sz := 3 + int(b[1]/4) // TODO: fix unaligned buffer sizes
+	sz := 3 + int(b[1]/4)
 	if len(b) < sz {
 		return nil, fmt.Errorf("vcio: tag buffer is too small")
 	}
@@ -133,6 +133,7 @@ func ReadTag(b []uint32) (Tag, error) {
 
 // Mailbox implements the Mailbox protocol used by the VideoCore and ARM on a Raspberry Pi.
 type Mailbox struct {
+	mu           sync.Mutex
 	f            *os.File
 	bufUnaligned [48]uint32
 	buf          []uint32
@@ -162,16 +163,26 @@ func (c *Mailbox) Close() (err error) {
 // Do sends a single command tag and returns all response tags. Returned memory is only usable until
 // the next request is made.
 func (m *Mailbox) Do(tagID uint32, bufferBytes int, args ...uint32) ([]Tag, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Align buffer to 16-byte boundary
 	if m.buf == nil {
 		offset := uintptr(unsafe.Pointer(&m.bufUnaligned[0])) & 15
 		m.buf = m.bufUnaligned[16-offset : uintptr(len(m.bufUnaligned))-offset]
 	}
 
-	// Compute value buffer length
-	// TODO: ensure 32-bit aligned
+	// Compute value buffer length (ensure 32-bit aligned)
+	if bufferBytes%4 != 0 {
+		bufferBytes = (bufferBytes + 3) &^ 3
+	}
 	if bufferBytes < len(args)*4 {
 		bufferBytes = len(args) * 4
+	}
+
+	// Zero the buffer before use
+	for i := range m.buf {
+		m.buf[i] = 0
 	}
 
 	// Write request header
@@ -183,7 +194,7 @@ func (m *Mailbox) Do(tagID uint32, bufferBytes int, args ...uint32) ([]Tag, erro
 	m.buf[3] = uint32(bufferBytes) // Value buffer size in bytes
 	m.buf[4] = 0                   // This is a request
 	copy(m.buf[5:], args)          // Write value buffer
-	// TODO: zero remaining buffer and end tag
+	// End tag is already zero from buffer zeroing
 
 	debugf("TX:\n")
 	for i, v := range m.buf[:5+len(args)] {
@@ -234,8 +245,14 @@ func (m *Mailbox) getUint32(tagID uint32) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	// TODO: bounds check
-	return tags[0].Value()[0], nil
+	if len(tags) == 0 {
+		return 0, fmt.Errorf("vcio: no tags returned for tag ID 0x%08x", tagID)
+	}
+	val := tags[0].Value()
+	if len(val) == 0 {
+		return 0, fmt.Errorf("vcio: empty value buffer for tag ID 0x%08x", tagID)
+	}
+	return val[0], nil
 }
 
 func (m *Mailbox) getUint32ByID(tagID, id uint32) (uint32, error) {
@@ -243,9 +260,17 @@ func (m *Mailbox) getUint32ByID(tagID, id uint32) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	// TODO: check response ID matches
-	// TODO: bounds check
-	return tags[0].Value()[1], nil
+	if len(tags) == 0 {
+		return 0, fmt.Errorf("vcio: no tags returned for tag ID 0x%08x", tagID)
+	}
+	val := tags[0].Value()
+	if len(val) < 2 {
+		return 0, fmt.Errorf("vcio: value buffer too small for tag ID 0x%08x (got %d, need 2)", tagID, len(val))
+	}
+	if val[0] != id {
+		return 0, fmt.Errorf("vcio: response ID mismatch for tag ID 0x%08x (got 0x%08x, want 0x%08x)", tagID, val[0], id)
+	}
+	return val[1], nil
 }
 
 func debugf(format string, a ...interface{}) {
@@ -282,17 +307,17 @@ const (
 	PowerDeviceIDI2C2   PowerDeviceID = 0x00000006
 	PowerDeviceIDSPI    PowerDeviceID = 0x00000007
 	PowerDeviceIDCCP2TX PowerDeviceID = 0x00000008
-
-// PowerDeviceIDUnknown (RPi4) PowerDeviceID = 0x00000009
-// PowerDeviceIDUnknown (RPi4) PowerDeviceID = 0x0000000a
+	// RPi 4/5 additional power devices
+	PowerDeviceIDUnknown0 PowerDeviceID = 0x00000009
+	PowerDeviceIDUnknown1 PowerDeviceID = 0x0000000a
 )
 
 type PowerState uint32
 
 const (
+	PowerStateOff     uint32 = 0x00000000
 	PowerStateOn      uint32 = 0x00000001
-	PowerStateOff     uint32 = 0x00000001
-	PowerStateMissing uint32 = 0x00000010
+	PowerStateMissing uint32 = 0x00000002
 )
 
 func (m *Mailbox) GetPowerState(id PowerDeviceID) (PowerState, error) {
@@ -320,6 +345,8 @@ const (
 	ClockIDEMMC2    ClockID = 0x00000000c
 	ClockIDM2MC     ClockID = 0x00000000d
 	ClockIDPixelBVB ClockID = 0x00000000e
+	// RPi 5 RP1 southbridge clocks
+	ClockIDVEC ClockID = 0x00000000f
 )
 
 func (m *Mailbox) GetClockRate(id ClockID) (hz int, err error) {

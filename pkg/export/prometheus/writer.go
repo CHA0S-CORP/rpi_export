@@ -54,6 +54,7 @@ var clockLabelsByID = map[mbox.ClockID]string{
 	mbox.ClockIDEMMC2:    "emmc2",
 	mbox.ClockIDM2MC:     "m2mc",
 	mbox.ClockIDPixelBVB: "pixel_bvb",
+	mbox.ClockIDVEC:      "vec", // RPi 5
 }
 
 func formatTemp(t float32) string  { return fmt.Sprintf("%.03f", t) }
@@ -70,6 +71,7 @@ type expWriter struct {
 	w      io.Writer
 	name   string
 	labels []string
+	err    error
 }
 
 // Write all metrics in Prometheus text-based exposition format.
@@ -86,8 +88,12 @@ func (w *expWriter) writeHeader(name, help, metricType string, labels ...string)
 }
 
 func (w *expWriter) writeSample(val interface{}, labels ...string) {
+	if w.err != nil {
+		return
+	}
 	if len(labels) != len(w.labels) {
-		panic("developer error: incorrect metrics label count")
+		w.err = fmt.Errorf("incorrect metrics label count: got %d, want %d", len(labels), len(w.labels))
+		return
 	}
 	fmt.Fprintf(w.w, w.name)
 	if len(w.labels) > 0 {
@@ -257,5 +263,5 @@ func (w *expWriter) write() error {
 		}
 		w.writeSample(formatVolts(volts), label)
 	}
-	return nil
+	return w.err
 }
