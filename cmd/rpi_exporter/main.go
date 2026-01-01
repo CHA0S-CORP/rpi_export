@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"log"
@@ -60,10 +61,14 @@ func main() {
 	if *flagAddr != "" {
 		// Metrics endpoint
 		http.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if err := prometheus.Write(w, cfg); err != nil {
+			var buf bytes.Buffer
+			if err := prometheus.Write(&buf, cfg); err != nil {
 				log.Printf("Error: %v", err)
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				return
 			}
+			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+			buf.WriteTo(w)
 		}))
 
 		// Health check endpoint

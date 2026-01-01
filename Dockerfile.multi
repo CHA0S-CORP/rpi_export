@@ -6,6 +6,10 @@ EXPOSE 9110
 
 WORKDIR /opt
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY binaries/${TARGETARCH}/rpi_exporter /opt/rpi_exporter
 RUN chmod +x /opt/rpi_exporter
 
