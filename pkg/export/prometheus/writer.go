@@ -173,19 +173,17 @@ func (w *expWriter) writeVideoCoreMetrics() error {
 	}
 	w.writeSample(rev)
 
-	w.writeHeader("rpi_board_model", "Board model.", metricTypeGauge)
-	model, err := m.GetBoardModel()
-	if err != nil {
-		return err
+	// Board model and revision are not supported on Pi 5 (returns EINVAL)
+	// These are available via device tree on Pi 5: /proc/device-tree/model
+	if model, err := m.GetBoardModel(); err == nil {
+		w.writeHeader("rpi_board_model", "Board model.", metricTypeGauge)
+		w.writeSample(model)
 	}
-	w.writeSample(model)
 
-	w.writeHeader("rpi_board_revision", "Board revision.", metricTypeGauge)
-	rev, err = m.GetBoardRevision()
-	if err != nil {
-		return err
+	if rev, err := m.GetBoardRevision(); err == nil {
+		w.writeHeader("rpi_board_revision", "Board revision.", metricTypeGauge)
+		w.writeSample(rev)
 	}
-	w.writeSample(rev)
 
 	/*
 	 * Power.
@@ -199,7 +197,7 @@ func (w *expWriter) writeVideoCoreMetrics() error {
 	for id, label := range powerLabelsByID {
 		powerState, err := m.GetPowerState(id)
 		if err != nil {
-			return err
+			continue // Skip unsupported power devices on Pi 5
 		}
 		w.writeSample(powerState, label)
 	}
@@ -211,7 +209,7 @@ func (w *expWriter) writeVideoCoreMetrics() error {
 	for id, label := range clockLabelsByID {
 		clockRate, err := m.GetClockRate(id)
 		if err != nil {
-			return err
+			continue // Skip unsupported clocks on Pi 5
 		}
 		w.writeSample(clockRate, label)
 	}
@@ -220,17 +218,16 @@ func (w *expWriter) writeVideoCoreMetrics() error {
 	for id, label := range clockLabelsByID {
 		clockRate, err := m.GetClockRateMeasured(id)
 		if err != nil {
-			return err
+			continue // Skip unsupported clocks on Pi 5
 		}
 		w.writeSample(clockRate, label)
 	}
 
-	w.writeHeader("rpi_turbo", "Turbo state.", metricTypeGauge)
-	turbo, err := m.GetTurbo()
-	if err != nil {
-		return err
+	// Turbo state may not be supported on Pi 5
+	if turbo, err := m.GetTurbo(); err == nil {
+		w.writeHeader("rpi_turbo", "Turbo state.", metricTypeGauge)
+		w.writeSample(formatBool(turbo))
 	}
-	w.writeSample(formatBool(turbo))
 
 	/*
 	 * Temperature sensors.
@@ -282,7 +279,7 @@ func (w *expWriter) writeVideoCoreMetrics() error {
 	for id, label := range voltageLabelsByID {
 		volts, err := m.GetVoltage(id)
 		if err != nil {
-			return err
+			continue // Skip unsupported voltage IDs on Pi 5
 		}
 		w.writeSample(formatVolts(volts), label)
 	}
@@ -291,7 +288,7 @@ func (w *expWriter) writeVideoCoreMetrics() error {
 	for id, label := range voltageLabelsByID {
 		volts, err := m.GetMinVoltage(id)
 		if err != nil {
-			return err
+			continue // Skip unsupported voltage IDs on Pi 5
 		}
 		w.writeSample(formatVolts(volts), label)
 	}
@@ -300,7 +297,7 @@ func (w *expWriter) writeVideoCoreMetrics() error {
 	for id, label := range voltageLabelsByID {
 		volts, err := m.GetMaxVoltage(id)
 		if err != nil {
-			return err
+			continue // Skip unsupported voltage IDs on Pi 5
 		}
 		w.writeSample(formatVolts(volts), label)
 	}
