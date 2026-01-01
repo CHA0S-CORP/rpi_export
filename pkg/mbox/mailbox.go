@@ -190,29 +190,38 @@ func (m *Mailbox) Do(tagID uint32, bufferBytes int, args ...uint32) ([]Tag, erro
 		bufferBytes = len(args) * 4
 	}
 
+	// Calculate message size: header (2) + tag header (3) + value buffer + end tag (1)
+	valueWords := bufferBytes / 4
+	msgWords := 2 + 3 + valueWords + 1
+	msgBytes := msgWords * 4
+
 	// Zero the buffer before use
 	for i := range m.buf {
 		m.buf[i] = 0
 	}
 
 	// Write request header
-	m.buf[0] = uint32(len(m.buf)) * 4 // buffer size
-	m.buf[1] = RequestCodeDefault     // request code
+	m.buf[0] = uint32(msgBytes)   // actual message size in bytes
+	m.buf[1] = RequestCodeDefault // request code
 
 	// Write request tag
 	m.buf[2] = tagID
 	m.buf[3] = uint32(bufferBytes) // Value buffer size in bytes
 	m.buf[4] = 0                   // This is a request
 	copy(m.buf[5:], args)          // Write value buffer
-	// End tag is already zero from buffer zeroing
+	// End tag at m.buf[5+valueWords] is already zero from buffer zeroing
 
-	debugf("TX:\n")
-	for i, v := range m.buf[:5+len(args)] {
+	debugf("TX (msgBytes=%d, valueWords=%d):\n", msgBytes, valueWords)
+	for i, v := range m.buf[:msgWords] {
 		debugf("  %02d: 0x%08X\n", i, v)
 	}
 
 	// Send message via ioctl
+	debugf("ioctl: fd=%d, op=0x%08X, buf=%p\n", m.f.Fd(), mbIoctl, &m.buf[0])
 	err := ioctl.Ioctl(m.f.Fd(), uintptr(mbIoctl), uintptr(unsafe.Pointer(&m.buf[0])))
+	if err != nil {
+		debugf("ioctl error: %v\n", err)
+	}
 	if err != nil {
 		return nil, err
 	}
