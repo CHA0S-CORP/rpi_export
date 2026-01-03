@@ -8,6 +8,30 @@ Sensors:
   - LPS25H: Pressure and temperature
   - LSM9DS1: Accelerometer, gyroscope, magnetometer (IMU)
   - TCS34725: Color sensor (v2 only)
+
+# Kernel Driver Conflicts
+
+This package accesses sensors directly via I2C. If the kernel has IIO drivers
+loaded for these sensors, you will get "device or resource busy" errors.
+
+To use this package, blacklist the conflicting kernel modules by creating
+/etc/modprobe.d/blacklist-sensehat.conf with:
+
+	blacklist hts221
+	blacklist hts221_i2c
+	blacklist lps25
+	blacklist lps25_i2c
+	blacklist st_pressure
+	blacklist st_sensors
+	blacklist st_sensors_i2c
+
+Then reboot or unload the modules manually:
+
+	sudo rmmod hts221_i2c hts221 lps25_i2c lps25 st_pressure st_sensors_i2c st_sensors
+
+You can verify no drivers are bound with:
+
+	ls /sys/bus/i2c/devices/1-00*/driver 2>/dev/null
 */
 package sensehat
 
@@ -577,8 +601,9 @@ func (s *SenseHat) GetColor() (r, g, b, c uint8, err error) {
 		return 0, 0, 0, 0, fmt.Errorf("color sensor not available")
 	}
 
-	// Read RGBC data (command bit | auto-increment | register)
-	data, err := s.readRegs(addrTCS34725, 0x80|0x20|0x14, 8)
+	// Read RGBC data starting at CDATAL (0x14)
+	// Note: readRegs already sets the auto-increment bit (0x80)
+	data, err := s.readRegs(addrTCS34725, 0x14, 8)
 	if err != nil {
 		return 0, 0, 0, 0, err
 	}
@@ -623,6 +648,27 @@ func (s *SenseHat) ClearLEDs() error {
 	// Write 193 bytes: 1 register address + 192 bytes of zeros (64 pixels × 3 bytes RGB)
 	buf := make([]byte, 193)
 	buf[0] = 0x00 // Register address
+	_, err := s.i2cFile.Write(buf)
+	return err
+}
+
+// SetPixel sets a single pixel on the 8x8 LED matrix.
+// x and y are 0-7, r/g/b are 0-255 (scaled to 0-31 for the hardware).
+func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
+	if x < 0 || x > 7 || y < 0 || y > 7 {
+		return fmt.Errorf("pixel coordinates out of range: (%d, %d)", x, y)
+	}
+	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
+		return err
+	}
+	// Each pixel is 3 bytes (RGB), scaled from 0-255 to 0-31
+	offset := (y*8 + x) * 3
+	buf := []byte{
+		byte(offset),
+		r >> 3,
+		g >> 3,
+		b >> 3,
+	}
 	_, err := s.i2cFile.Write(buf)
 	return err
 }

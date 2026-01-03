@@ -40,9 +40,12 @@ func main() {
 				log.Println("Sense HAT initialized")
 				defer hat.Close()
 
-				// Clear LED matrix
+				// Clear LED matrix and set green corner pixel
 				if err := hat.ClearLEDs(); err != nil {
 					log.Printf("Warning: Failed to clear LEDs: %v", err)
+				}
+				if err := hat.SetPixel(0, 0, 0, 255, 0); err != nil {
+					log.Printf("Warning: Failed to set corner LED: %v", err)
 				}
 
 				if hat.HasColorSensor() {
