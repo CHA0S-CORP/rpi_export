@@ -29,10 +29,9 @@ Then reboot or unload the modules manually:
 
 	sudo rmmod hts221_i2c hts221 lps25_i2c lps25 st_pressure st_sensors_i2c st_sensors
 
-You can verify no drivers are bound with:
 
-	ls /sys/bus/i2c/devices/1-00*/driver 2>/dev/null
 */
+
 package sensehat
 
 import (
