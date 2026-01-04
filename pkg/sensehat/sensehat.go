@@ -674,15 +674,16 @@ func (s *SenseHat) ClearLEDs() error {
 	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
 		return err
 	}
-	// Write 193 bytes: 1 register address + 192 bytes of zeros (64 pixels × 3 bytes RGB)
-	buf := make([]byte, 193)
+	// Write 129 bytes: 1 register address + 128 bytes of zeros (64 pixels × 2 bytes RGB565)
+	buf := make([]byte, 129)
 	buf[0] = 0x00 // Register address
 	_, err := s.i2cFile.Write(buf)
 	return err
 }
 
 // SetPixel sets a single pixel on the 8x8 LED matrix.
-// x and y are 0-7, r/g/b are 0-255 (scaled to 0-31 for the hardware).
+// x and y are 0-7, r/g/b are 0-255.
+// Uses RGB565 format: 5 bits red, 6 bits green, 5 bits blue packed into 2 bytes.
 func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
 	if x < 0 || x > 7 || y < 0 || y > 7 {
 		return fmt.Errorf("pixel coordinates out of range: (%d, %d)", x, y)
@@ -690,15 +691,19 @@ func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
 	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
 		return err
 	}
-	// Pixel offset in framebuffer: row-major order, 3 bytes per pixel
-	// y = row (0 = closest to GPIO), x = column
-	offset := (y*8 + x) * 3
-	// Write register address followed by color values (RGB order, scaled to 0-31)
+	// Pixel offset in framebuffer: row-major order, 2 bytes per pixel (RGB565)
+	// y = row, x = column
+	offset := (y*8 + x) * 2
+	// Pack RGB into RGB565: (r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)
+	r5 := uint16(r >> 3)
+	g6 := uint16(g >> 2)
+	b5 := uint16(b >> 3)
+	rgb565 := (r5 << 11) | (g6 << 5) | b5
+	// Write register address followed by 2-byte RGB565 value (little-endian)
 	buf := []byte{
 		byte(offset),
-		r >> 3,
-		g >> 3,
-		b >> 3,
+		byte(rgb565 & 0xFF),        // low byte
+		byte((rgb565 >> 8) & 0xFF), // high byte
 	}
 	_, err := s.i2cFile.Write(buf)
 	return err
