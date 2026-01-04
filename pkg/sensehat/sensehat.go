@@ -163,10 +163,10 @@ func New() (*SenseHat, error) {
 	// Try to initialize color sensor (Sense HAT v2 only)
 	hat.hasColorSensor = hat.initColorSensor() == nil
 
-	// Initialize LED framebuffer
+	// Initialize LED framebuffer (optional - may not be available in containers)
 	if err := hat.initFramebuffer(); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("failed to initialize LED framebuffer: %w", err)
+		// Log warning but continue - LED functions will return errors
+		fmt.Printf("Warning: LED framebuffer not available: %v\n", err)
 	}
 
 	// Initialize joystick
@@ -684,7 +684,7 @@ func GetCPUTemperature() (float64, error) {
 
 // initFramebuffer finds and opens the Sense HAT LED framebuffer device.
 func (s *SenseHat) initFramebuffer() error {
-	// Find the framebuffer device with name "RPi-Sense FB"
+	// First try to find the framebuffer by name via sysfs
 	for i := 0; i < 10; i++ {
 		namePath := fmt.Sprintf("/sys/class/graphics/fb%d/name", i)
 		name, err := os.ReadFile(namePath)
@@ -701,7 +701,16 @@ func (s *SenseHat) initFramebuffer() error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Sense HAT framebuffer not found")
+
+	// Fallback: try /dev/fb1 directly (common location for Sense HAT)
+	// This helps in Docker containers where sysfs may not be fully available
+	fb, err := os.OpenFile("/dev/fb1", os.O_RDWR, 0)
+	if err == nil {
+		s.fbFile = fb
+		return nil
+	}
+
+	return fmt.Errorf("Sense HAT framebuffer not found (tried sysfs lookup and /dev/fb1)")
 }
 
 // ClearLEDs turns off all LEDs on the 8x8 matrix.
