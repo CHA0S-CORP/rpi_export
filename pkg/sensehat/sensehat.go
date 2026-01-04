@@ -690,13 +690,14 @@ func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
 	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
 		return err
 	}
-	// Each pixel is 3 bytes (RGB), scaled from 0-255 to 0-31
-	offset := (y*8 + x) * 3
+	// Each pixel is 3 bytes (RBG order for ATTINY88), scaled from 0-255 to 0-31
+	// The LED matrix is laid out with x as rows (closest to GPIO = x=0)
+	offset := (x*8 + y) * 3
 	buf := []byte{
 		byte(offset),
 		r >> 3,
-		g >> 3,
 		b >> 3,
+		g >> 3,
 	}
 	_, err := s.i2cFile.Write(buf)
 	return err
@@ -712,29 +713,35 @@ func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) err
 	return s.SetPixel(x, y, 0, 0, 0)
 }
 
-// SetNavLights turns on the navigation lights (red port, green starboard) on the bottom row.
+// SetNavLights turns on the navigation lights (red port, green starboard) on the top row.
 func (s *SenseHat) SetNavLights() error {
-	if err := s.SetPixel(0, 7, 255, 0, 0); err != nil { // Red - port (left)
+	if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - port (left)
 		return err
 	}
-	return s.SetPixel(7, 7, 0, 255, 0) // Green - starboard (right)
+	return s.SetPixel(7, 0, 0, 255, 0) // Green - starboard (right)
 }
 
-// FlashStrobes briefly flashes the strobe lights on the top corners.
+// FlashStrobes double-flashes the strobe lights on the bottom corners (0,7) and (7,7).
 func (s *SenseHat) FlashStrobes(duration time.Duration) error {
-	// Turn on strobes
-	if err := s.SetPixel(0, 0, 255, 255, 255); err != nil {
-		return err
+	// Double flash pattern
+	for flash := 0; flash < 2; flash++ {
+		// Flash on - bottom left corner
+		s.SetPixel(0, 7, 255, 255, 255)
+		// Flash on - bottom right corner
+		s.SetPixel(7, 7, 255, 255, 255)
+
+		time.Sleep(duration)
+
+		// Flash off - bottom left corner
+		s.SetPixel(0, 7, 0, 0, 0)
+		// Flash off - bottom right corner
+		s.SetPixel(7, 7, 0, 0, 0)
+
+		if flash == 0 {
+			time.Sleep(duration / 2)
+		}
 	}
-	if err := s.SetPixel(7, 0, 255, 255, 255); err != nil {
-		return err
-	}
-	time.Sleep(duration)
-	// Turn off strobes
-	if err := s.SetPixel(0, 0, 0, 0, 0); err != nil {
-		return err
-	}
-	return s.SetPixel(7, 0, 0, 0, 0)
+	return nil
 }
 
 // PlaneAnimation animates a plane flying across the LED matrix with nav lights.
@@ -768,21 +775,21 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 			}
 		}
 
-		// Navigation lights: green on right (starboard), red on left (port)
-		if err := s.SetPixel(0, 7, 255, 0, 0); err != nil { // Red - port (left)
+		// Navigation lights: red on left (port), green on right (starboard) - top row
+		if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - port (left)
 			return err
 		}
-		if err := s.SetPixel(7, 7, 0, 255, 0); err != nil { // Green - starboard (right)
+		if err := s.SetPixel(7, 0, 0, 255, 0); err != nil { // Green - starboard (right)
 			return err
 		}
 
-		// Strobe lights: white flashing every 4 frames, opposite corners
+		// Strobe lights: white double-flashing every 4 frames - bottom corners
 		strobeOn := (strobeCounter % 4) < 2
 		if strobeOn {
-			if err := s.SetPixel(7, 0, 255, 255, 255); err != nil { // White strobe top-right
+			if err := s.SetPixel(0, 7, 255, 255, 255); err != nil { // White strobe bottom-left
 				return err
 			}
-			if err := s.SetPixel(0, 0, 255, 255, 255); err != nil { // White strobe top-left
+			if err := s.SetPixel(7, 7, 255, 255, 255); err != nil { // White strobe bottom-right
 				return err
 			}
 		}
