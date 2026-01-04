@@ -229,8 +229,25 @@ func (s *SenseHat) readRegs(addr uint8, reg byte, n int) ([]byte, error) {
 	if err := setI2CAddr(s.i2cFile, addr); err != nil {
 		return nil, err
 	}
-	// Set auto-increment bit for multi-byte reads
+	// Set auto-increment bit for multi-byte reads (0x80 for HTS221/LPS25H/LSM9DS1)
 	if _, err := s.i2cFile.Write([]byte{reg | 0x80}); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, n)
+	if _, err := s.i2cFile.Read(buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// readColorRegs reads multiple registers from the TCS34725/TCS3400 color sensor.
+// The color sensor uses a different command format: 0x80 (command) | 0x20 (auto-increment) | reg.
+func (s *SenseHat) readColorRegs(reg byte, n int) ([]byte, error) {
+	if err := setI2CAddr(s.i2cFile, s.colorSensorAddr); err != nil {
+		return nil, err
+	}
+	// TCS34725/TCS3400 command format: bit 7 = command, bits 6:5 = 01 for auto-increment
+	if _, err := s.i2cFile.Write([]byte{0x80 | 0x20 | reg}); err != nil {
 		return nil, err
 	}
 	buf := make([]byte, n)
@@ -478,7 +495,10 @@ func (s *SenseHat) readJoystickEvents() {
 			}
 
 			s.joystickMu.Lock()
-			s.joystickEvents = append(s.joystickEvents, event)
+			// Limit buffer size to prevent unbounded growth if events aren't consumed
+			if len(s.joystickEvents) < 100 {
+				s.joystickEvents = append(s.joystickEvents, event)
+			}
 			s.joystickMu.Unlock()
 		}
 	}
@@ -644,8 +664,7 @@ func (s *SenseHat) GetColor() (r, g, b, c uint8, err error) {
 	}
 
 	// Read RGBC data starting at CDATAL (0x14)
-	// Note: readRegs already sets the auto-increment bit (0x80)
-	data, err := s.readRegs(s.colorSensorAddr, 0x14, 8)
+	data, err := s.readColorRegs(0x14, 8)
 	if err != nil {
 		return 0, 0, 0, 0, err
 	}
@@ -675,11 +694,16 @@ func GetCPUTemperature() (float64, error) {
 
 	scanner := bufio.NewScanner(f)
 	if scanner.Scan() {
-		if temp, err := strconv.ParseFloat(strings.TrimSpace(scanner.Text()), 64); err == nil {
-			return temp / 1000.0, nil
+		temp, err := strconv.ParseFloat(strings.TrimSpace(scanner.Text()), 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse CPU temperature: %w", err)
 		}
+		return temp / 1000.0, nil
 	}
-	return 0, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("failed to read CPU temperature: empty file")
 }
 
 // initFramebuffer finds and opens the Sense HAT LED framebuffer device.
@@ -783,14 +807,22 @@ func (s *SenseHat) SetNavLights() error {
 func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 	for flash := 0; flash < 2; flash++ {
 		// Flash on
-		s.SetPixel(0, 7, 255, 255, 255) // Left strobe (x=0, y=7)
-		s.SetPixel(7, 7, 255, 255, 255) // Right strobe (x=7, y=7)
+		if err := s.SetPixel(0, 7, 255, 255, 255); err != nil { // Left strobe (x=0, y=7)
+			return err
+		}
+		if err := s.SetPixel(7, 7, 255, 255, 255); err != nil { // Right strobe (x=7, y=7)
+			return err
+		}
 
 		time.Sleep(duration)
 
 		// Flash off
-		s.SetPixel(0, 7, 0, 0, 0)
-		s.SetPixel(7, 7, 0, 0, 0)
+		if err := s.SetPixel(0, 7, 0, 0, 0); err != nil {
+			return err
+		}
+		if err := s.SetPixel(7, 7, 0, 0, 0); err != nil {
+			return err
+		}
 
 		if flash == 0 {
 			time.Sleep(duration / 2)
