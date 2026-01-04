@@ -693,12 +693,12 @@ func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
 	// Pixel offset in framebuffer: row-major order, 3 bytes per pixel
 	// y = row (0 = closest to GPIO), x = column
 	offset := (y*8 + x) * 3
-	// Write register address followed by color values (BGR order, scaled to 0-31)
+	// Write register address followed by color values (BRG order, scaled to 0-31)
 	buf := []byte{
 		byte(offset),
 		b >> 3,
-		g >> 3,
 		r >> 3,
+		g >> 3,
 	}
 	_, err := s.i2cFile.Write(buf)
 	return err
