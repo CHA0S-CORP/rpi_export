@@ -690,15 +690,15 @@ func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
 	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
 		return err
 	}
-	// Pixel offset in framebuffer: row-major order, 3 bytes per pixel (RGB)
+	// Pixel offset in framebuffer: row-major order, 3 bytes per pixel
 	// y = row (0 = closest to GPIO), x = column
 	offset := (y*8 + x) * 3
-	// Write register address followed by RGB values (scaled to 0-31)
+	// Write register address followed by color values (BGR order, scaled to 0-31)
 	buf := []byte{
 		byte(offset),
-		r >> 3,
-		g >> 3,
 		b >> 3,
+		g >> 3,
+		r >> 3,
 	}
 	_, err := s.i2cFile.Write(buf)
 	return err
