@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -143,6 +144,8 @@ type Mailbox struct {
 	f            *os.File
 	bufUnaligned [48]uint32
 	buf          []uint32
+	isPi5        bool // cached Pi 5 detection
+	pi5Detected  bool // whether we've checked for Pi 5
 }
 
 func Open() (f *Mailbox, err error) {
@@ -154,7 +157,33 @@ func Open() (f *Mailbox, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Mailbox{f: ff}, nil
+	m := &Mailbox{f: ff}
+	m.detectPi5()
+	return m, nil
+}
+
+// detectPi5 checks if we're running on a Raspberry Pi 5 by reading device tree.
+// Pi 5 doesn't support many mailbox requests (GetBoardModel, GetBoardRevision, etc.)
+func (m *Mailbox) detectPi5() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.pi5Detected {
+		return
+	}
+	m.pi5Detected = true
+
+	// Check device tree model string
+	data, err := os.ReadFile("/proc/device-tree/model")
+	if err != nil {
+		return
+	}
+	model := strings.TrimRight(string(data), "\x00\n")
+	m.isPi5 = strings.Contains(model, "Raspberry Pi 5")
+}
+
+// IsPi5 returns true if running on a Raspberry Pi 5.
+func (m *Mailbox) IsPi5() bool {
+	return m.isPi5
 }
 
 func (c *Mailbox) Close() (err error) {
@@ -304,13 +333,24 @@ func (m *Mailbox) GetFirmwareRevision() (uint32, error) {
 	return m.getUint32(TagGetFirmwareRevision)
 }
 
+// ErrNotSupportedOnPi5 is returned when a mailbox request is not supported on Pi 5.
+var ErrNotSupportedOnPi5 = errors.New("vcio: not supported on Raspberry Pi 5")
+
 // GetBoardModel returns the model number of the system board.
+// Not supported on Raspberry Pi 5.
 func (m *Mailbox) GetBoardModel() (uint32, error) {
+	if m.isPi5 {
+		return 0, ErrNotSupportedOnPi5
+	}
 	return m.getUint32(TagGetBoardModel)
 }
 
 // GetBoardRevision returns the revision number of the system board.
+// Not supported on Raspberry Pi 5.
 func (m *Mailbox) GetBoardRevision() (uint32, error) {
+	if m.isPi5 {
+		return 0, ErrNotSupportedOnPi5
+	}
 	return m.getUint32(TagGetBoardRevision)
 }
 
