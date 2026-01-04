@@ -712,6 +712,31 @@ func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) err
 	return s.SetPixel(x, y, 0, 0, 0)
 }
 
+// SetNavLights turns on the navigation lights (red port, green starboard) on the bottom row.
+func (s *SenseHat) SetNavLights() error {
+	if err := s.SetPixel(0, 7, 255, 0, 0); err != nil { // Red - port (left)
+		return err
+	}
+	return s.SetPixel(7, 7, 0, 255, 0) // Green - starboard (right)
+}
+
+// FlashStrobes briefly flashes the strobe lights on the top corners.
+func (s *SenseHat) FlashStrobes(duration time.Duration) error {
+	// Turn on strobes
+	if err := s.SetPixel(0, 0, 255, 255, 255); err != nil {
+		return err
+	}
+	if err := s.SetPixel(7, 0, 255, 255, 255); err != nil {
+		return err
+	}
+	time.Sleep(duration)
+	// Turn off strobes
+	if err := s.SetPixel(0, 0, 0, 0, 0); err != nil {
+		return err
+	}
+	return s.SetPixel(7, 0, 0, 0, 0)
+}
+
 // PlaneAnimation animates a plane flying across the LED matrix with nav lights.
 func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 	// Plane shape (relative pixels from nose position)

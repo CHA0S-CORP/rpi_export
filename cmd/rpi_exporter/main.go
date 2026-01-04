@@ -41,9 +41,12 @@ func main() {
 				log.Println("Sense HAT initialized")
 				defer hat.Close()
 
-				// Clear LED matrix on startup
+				// Clear LED matrix on startup and set nav lights
 				if err := hat.ClearLEDs(); err != nil {
 					log.Printf("Warning: Failed to clear LEDs: %v", err)
+				}
+				if err := hat.SetNavLights(); err != nil {
+					log.Printf("Warning: Failed to set nav lights: %v", err)
 				}
 
 				if hat.HasColorSensor() {
@@ -62,9 +65,9 @@ func main() {
 	if *flagAddr != "" {
 		// Metrics endpoint
 		http.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Flash LED on scrape
+			// Flash strobes on scrape
 			if hat != nil {
-				go hat.FlashLED(0, 0, 0, 255, 0, 100*time.Millisecond)
+				go hat.FlashStrobes(100 * time.Millisecond)
 			}
 			var buf bytes.Buffer
 			if err := prometheus.Write(&buf, cfg); err != nil {
@@ -118,8 +121,13 @@ func main() {
 
 			switch r.Method {
 			case http.MethodDelete:
-				// Clear all LEDs
+				// Clear all LEDs (except nav lights)
 				if err := hat.ClearLEDs(); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				// Restore nav lights
+				if err := hat.SetNavLights(); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
@@ -136,6 +144,11 @@ func main() {
 				}
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 					http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				// Protect top row (strobes) and bottom row (nav lights)
+				if req.Y == 0 || req.Y == 7 {
+					http.Error(w, "top and bottom rows are reserved for nav/strobe lights", http.StatusForbidden)
 					return
 				}
 				if err := hat.SetPixel(req.X, req.Y, req.R, req.G, req.B); err != nil {
