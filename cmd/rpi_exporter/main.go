@@ -47,6 +47,8 @@ func main() {
 				}
 				if err := hat.SetNavLights(); err != nil {
 					log.Printf("Warning: Failed to set nav lights: %v", err)
+				} else {
+					log.Println("Nav lights enabled")
 				}
 
 				if hat.HasColorSensor() {

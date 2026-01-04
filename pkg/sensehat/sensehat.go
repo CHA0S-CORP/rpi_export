@@ -791,8 +791,11 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 		time.Sleep(frameDelay)
 	}
 
-	// Clear after animation
-	return s.ClearLEDs()
+	// Clear after animation and restore nav lights
+	if err := s.ClearLEDs(); err != nil {
+		return err
+	}
+	return s.SetNavLights()
 }
 
 // inputEvent represents a Linux input event structure for unsafe sizeof
