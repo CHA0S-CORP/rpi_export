@@ -714,28 +714,31 @@ func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) err
 	return s.SetPixel(x, y, 0, 0, 0)
 }
 
-// SetNavLights turns on the navigation lights on corners of GPIO-side edge.
+// SetNavLights turns on the navigation lights.
+// Row 0 (SD card side): strobes handled separately
+// Row 1: Green(1,0) on HDMI side, Red(1,7) on GPIO side
 func (s *SenseHat) SetNavLights() error {
-	// Red on one corner, Green on the other (same row)
-	if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red
+	// Green on HDMI side (left)
+	if err := s.SetPixel(1, 0, 0, 255, 0); err != nil { // Green
 		return err
 	}
-	return s.SetPixel(0, 7, 0, 255, 0) // Green
+	// Red on GPIO side (right)
+	return s.SetPixel(1, 7, 255, 0, 0) // Red
 }
 
-// FlashStrobes double-flashes the strobe lights on opposite edge corners.
+// FlashStrobes double-flashes the strobe lights.
+// Row 0 (SD card side): Strobe(0,0) on HDMI side, Strobe(0,7) on GPIO side
 func (s *SenseHat) FlashStrobes(duration time.Duration) error {
-	// Double flash pattern on far edge
 	for flash := 0; flash < 2; flash++ {
 		// Flash on
-		s.SetPixel(7, 0, 255, 255, 255)
-		s.SetPixel(7, 7, 255, 255, 255)
+		s.SetPixel(0, 0, 255, 255, 255) // HDMI side strobe
+		s.SetPixel(0, 7, 255, 255, 255) // GPIO side strobe
 
 		time.Sleep(duration)
 
 		// Flash off
-		s.SetPixel(7, 0, 0, 0, 0)
-		s.SetPixel(7, 7, 0, 0, 0)
+		s.SetPixel(0, 0, 0, 0, 0)
+		s.SetPixel(0, 7, 0, 0, 0)
 
 		if flash == 0 {
 			time.Sleep(duration / 2)
@@ -775,21 +778,23 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 			}
 		}
 
-		// Navigation lights: red/green on GPIO-side edge
-		if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red
+		// Navigation lights
+		// Row 0: Strobe(0,0) HDMI side, Strobe(0,7) GPIO side
+		// Row 1: Green(1,0) HDMI side, Red(1,7) GPIO side
+		if err := s.SetPixel(1, 0, 0, 255, 0); err != nil { // Green (HDMI side)
 			return err
 		}
-		if err := s.SetPixel(0, 7, 0, 255, 0); err != nil { // Green
+		if err := s.SetPixel(1, 7, 255, 0, 0); err != nil { // Red (GPIO side)
 			return err
 		}
 
-		// Strobe lights: white flashing on far edge
+		// Strobe lights on row 0
 		strobeOn := (strobeCounter % 4) < 2
 		if strobeOn {
-			if err := s.SetPixel(7, 0, 255, 255, 255); err != nil {
+			if err := s.SetPixel(0, 0, 255, 255, 255); err != nil { // HDMI side strobe
 				return err
 			}
-			if err := s.SetPixel(7, 7, 255, 255, 255); err != nil {
+			if err := s.SetPixel(0, 7, 255, 255, 255); err != nil { // GPIO side strobe
 				return err
 			}
 		}
