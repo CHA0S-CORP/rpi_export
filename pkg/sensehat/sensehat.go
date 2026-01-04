@@ -29,19 +29,22 @@ Then reboot or unload the modules manually:
 
 	sudo rmmod hts221_i2c hts221 lps25_i2c lps25 st_pressure st_sensors_i2c st_sensors
 
-# LED Matrix and Joystick Conflicts
+# LED Matrix and Joystick
 
 The LED matrix and joystick are controlled by an ATTINY88 at I2C address 0x46.
-The kernel's rpisense-fb framebuffer driver claims this device by default.
+The kernel's rpisense-fb framebuffer driver exposes this as /dev/fb1.
 
-To use the LED functions, also blacklist the framebuffer driver:
+The LED functions in this package use the framebuffer device, so ensure the
+rpisense_fb module is loaded (it is by default on Raspberry Pi OS):
 
-	blacklist rpisense_fb
-	blacklist rpisense_js
+	lsmod | grep rpisense
 
-Then reboot or unload:
+If running in Docker, expose the framebuffer device and sysfs:
 
-	sudo rmmod rpisense_fb rpisense_js
+	devices:
+	  - /dev/fb1:/dev/fb1
+	volumes:
+	  - /sys/class/graphics:/sys/class/graphics:ro
 
 */
 
@@ -90,13 +93,14 @@ const (
 
 // SenseHat represents a Raspberry Pi Sense HAT device.
 type SenseHat struct {
-	i2cFile        *os.File
-	hasColorSensor bool
+	i2cFile         *os.File
+	fbFile          *os.File // LED matrix framebuffer
+	hasColorSensor  bool
 	colorSensorAddr uint8 // I2C address of detected color sensor (0x29 or 0x39)
-	joystickFile   *os.File
-	joystickEvents []JoystickEvent
-	joystickMu     sync.Mutex
-	joystickDone   chan struct{} // signals joystick goroutine to stop
+	joystickFile    *os.File
+	joystickEvents  []JoystickEvent
+	joystickMu      sync.Mutex
+	joystickDone    chan struct{} // signals joystick goroutine to stop
 
 	// HTS221 calibration coefficients
 	h0RH, h1RH       float64
@@ -159,6 +163,12 @@ func New() (*SenseHat, error) {
 	// Try to initialize color sensor (Sense HAT v2 only)
 	hat.hasColorSensor = hat.initColorSensor() == nil
 
+	// Initialize LED framebuffer
+	if err := hat.initFramebuffer(); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("failed to initialize LED framebuffer: %w", err)
+	}
+
 	// Initialize joystick
 	hat.initJoystick()
 
@@ -173,6 +183,9 @@ func (s *SenseHat) Close() error {
 	}
 	if s.joystickFile != nil {
 		s.joystickFile.Close()
+	}
+	if s.fbFile != nil {
+		s.fbFile.Close()
 	}
 	return s.i2cFile.Close()
 }
@@ -669,43 +682,68 @@ func GetCPUTemperature() (float64, error) {
 	return 0, scanner.Err()
 }
 
+// initFramebuffer finds and opens the Sense HAT LED framebuffer device.
+func (s *SenseHat) initFramebuffer() error {
+	// Find the framebuffer device with name "RPi-Sense FB"
+	for i := 0; i < 10; i++ {
+		namePath := fmt.Sprintf("/sys/class/graphics/fb%d/name", i)
+		name, err := os.ReadFile(namePath)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(name)) == "RPi-Sense FB" {
+			fbPath := fmt.Sprintf("/dev/fb%d", i)
+			fb, err := os.OpenFile(fbPath, os.O_RDWR, 0)
+			if err != nil {
+				return fmt.Errorf("failed to open framebuffer %s: %w", fbPath, err)
+			}
+			s.fbFile = fb
+			return nil
+		}
+	}
+	return fmt.Errorf("Sense HAT framebuffer not found")
+}
+
 // ClearLEDs turns off all LEDs on the 8x8 matrix.
 func (s *SenseHat) ClearLEDs() error {
-	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
+	if s.fbFile == nil {
+		return fmt.Errorf("framebuffer not initialized")
+	}
+	// Write 128 bytes of zeros (64 pixels × 2 bytes RGB565)
+	buf := make([]byte, 128)
+	if _, err := s.fbFile.Seek(0, 0); err != nil {
 		return err
 	}
-	// Write 129 bytes: 1 register address + 128 bytes of zeros (64 pixels × 2 bytes RGB565)
-	buf := make([]byte, 129)
-	buf[0] = 0x00 // Register address
-	_, err := s.i2cFile.Write(buf)
+	_, err := s.fbFile.Write(buf)
 	return err
 }
 
 // SetPixel sets a single pixel on the 8x8 LED matrix.
-// x and y are 0-7, r/g/b are 0-255.
-// Uses RGB565 format: 5 bits red, 6 bits green, 5 bits blue packed into 2 bytes.
+// x (column) and y (row) are 0-7, r/g/b are 0-255.
+// Uses RGB565 format via framebuffer.
 func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
 	if x < 0 || x > 7 || y < 0 || y > 7 {
 		return fmt.Errorf("pixel coordinates out of range: (%d, %d)", x, y)
 	}
-	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
+	if s.fbFile == nil {
+		return fmt.Errorf("framebuffer not initialized")
+	}
+	// Pixel offset: row-major order, 2 bytes per pixel
+	offset := int64((y*8 + x) * 2)
+	// Pack RGB into RGB565: 5 bits red, 6 bits green, 5 bits blue
+	r5 := uint16(r>>3) & 0x1F
+	g6 := uint16(g>>2) & 0x3F
+	b5 := uint16(b>>3) & 0x1F
+	rgb565 := (r5 << 11) | (g6 << 5) | b5
+	// Write as little-endian 16-bit value (struct.pack('H', ...) in Python)
+	buf := []byte{
+		byte(rgb565 & 0xFF),
+		byte((rgb565 >> 8) & 0xFF),
+	}
+	if _, err := s.fbFile.Seek(offset, 0); err != nil {
 		return err
 	}
-	// Pixel offset in framebuffer: row-major order, 2 bytes per pixel (RGB565)
-	// y = row, x = column
-	offset := (y*8 + x) * 2
-	// Pack RGB into RGB565: (r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)
-	r5 := uint16(r >> 3)
-	g6 := uint16(g >> 2)
-	b5 := uint16(b >> 3)
-	rgb565 := (r5 << 11) | (g6 << 5) | b5
-	// Write register address followed by 2-byte RGB565 value (little-endian)
-	buf := []byte{
-		byte(offset),
-		byte(rgb565 & 0xFF),        // low byte
-		byte((rgb565 >> 8) & 0xFF), // high byte
-	}
-	_, err := s.i2cFile.Write(buf)
+	_, err := s.fbFile.Write(buf)
 	return err
 }
 
