@@ -29,6 +29,19 @@ Then reboot or unload the modules manually:
 
 	sudo rmmod hts221_i2c hts221 lps25_i2c lps25 st_pressure st_sensors_i2c st_sensors
 
+# LED Matrix and Joystick Conflicts
+
+The LED matrix and joystick are controlled by an ATTINY88 at I2C address 0x46.
+The kernel's rpisense-fb framebuffer driver claims this device by default.
+
+To use the LED functions, also blacklist the framebuffer driver:
+
+	blacklist rpisense_fb
+	blacklist rpisense_js
+
+Then reboot or unload:
+
+	sudo rmmod rpisense_fb rpisense_js
 
 */
 
@@ -687,6 +700,16 @@ func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
 	}
 	_, err := s.i2cFile.Write(buf)
 	return err
+}
+
+// FlashLED briefly flashes a pixel at the given coordinates.
+// The LED turns on with the specified color, waits for the duration, then turns off.
+func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) error {
+	if err := s.SetPixel(x, y, r, g, b); err != nil {
+		return err
+	}
+	time.Sleep(duration)
+	return s.SetPixel(x, y, 0, 0, 0)
 }
 
 // inputEvent represents a Linux input event structure for unsafe sizeof

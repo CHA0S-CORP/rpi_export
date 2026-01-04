@@ -40,12 +40,9 @@ func main() {
 				log.Println("Sense HAT initialized")
 				defer hat.Close()
 
-				// Clear LED matrix and set green corner pixel
+				// Clear LED matrix on startup
 				if err := hat.ClearLEDs(); err != nil {
 					log.Printf("Warning: Failed to clear LEDs: %v", err)
-				}
-				if err := hat.SetPixel(0, 0, 0, 255, 0); err != nil {
-					log.Printf("Warning: Failed to set corner LED: %v", err)
 				}
 
 				if hat.HasColorSensor() {
@@ -64,6 +61,10 @@ func main() {
 	if *flagAddr != "" {
 		// Metrics endpoint
 		http.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Flash LED on scrape
+			if hat != nil {
+				go hat.FlashLED(0, 0, 0, 255, 0, 100*time.Millisecond)
+			}
 			var buf bytes.Buffer
 			if err := prometheus.Write(&buf, cfg); err != nil {
 				log.Printf("Error: %v", err)
@@ -122,6 +123,13 @@ func main() {
 		// Wait for shutdown signal
 		<-done
 		log.Println("Shutting down...")
+
+		// Turn off LEDs on signal
+		if hat != nil {
+			if err := hat.ClearLEDs(); err != nil {
+				log.Printf("Warning: Failed to clear LEDs: %v", err)
+			}
+		}
 
 		// Graceful shutdown with timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
