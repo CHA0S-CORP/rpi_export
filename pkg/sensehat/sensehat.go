@@ -712,6 +712,44 @@ func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) err
 	return s.SetPixel(x, y, 0, 0, 0)
 }
 
+// PlaneAnimation animates a plane flying across the LED matrix from left to right.
+func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
+	// Plane shape (relative pixels from nose position)
+	// Shape:   >=>
+	//           =
+	plane := [][2]int{
+		{0, 0},   // nose
+		{-1, 0},  // body
+		{-2, 0},  // tail
+		{-1, -1}, // top wing
+		{-1, 1},  // bottom wing
+	}
+
+	// Animate plane flying from left (-2) to right (9) to fully exit
+	for x := -2; x <= 9; x++ {
+		// Clear the matrix
+		if err := s.ClearLEDs(); err != nil {
+			return err
+		}
+
+		// Draw plane at current position (y=3 for center)
+		for _, p := range plane {
+			px := x + p[0]
+			py := 3 + p[1]
+			if px >= 0 && px <= 7 && py >= 0 && py <= 7 {
+				if err := s.SetPixel(px, py, 255, 255, 255); err != nil {
+					return err
+				}
+			}
+		}
+
+		time.Sleep(frameDelay)
+	}
+
+	// Clear after animation
+	return s.ClearLEDs()
+}
+
 // inputEvent represents a Linux input event structure for unsafe sizeof
 type inputEvent struct {
 	Time  [16]byte // struct timeval

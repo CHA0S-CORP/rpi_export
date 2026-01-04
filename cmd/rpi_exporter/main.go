@@ -97,6 +97,18 @@ func main() {
 			w.Write([]byte("ready\n"))
 		}))
 
+		// Signal ready endpoint - plane animation
+		http.Handle("/signal-ready", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if hat == nil {
+				http.Error(w, "Sense HAT not available", http.StatusServiceUnavailable)
+				return
+			}
+			go hat.PlaneAnimation(80 * time.Millisecond)
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("ok\n"))
+		}))
+
 		// LED control endpoint
 		http.Handle("/led", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if hat == nil {
