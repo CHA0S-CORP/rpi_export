@@ -835,7 +835,7 @@ func (s *SenseHat) SetNavLights() error {
 
 // StartNavLights starts a background goroutine that keeps nav lights on.
 // The framebuffer can be cleared by external processes (kernel driver, console blanking),
-// so this periodically refreshes the nav lights to keep them visible.
+// so this periodically refreshes the gamma table and nav lights to keep them visible.
 func (s *SenseHat) StartNavLights() {
 	if s.fbFile == nil {
 		return
@@ -849,6 +849,7 @@ func (s *SenseHat) StartNavLights() {
 			case <-s.navLightsDone:
 				return
 			case <-ticker.C:
+				s.initGamma()
 				s.SetNavLights()
 			}
 		}
