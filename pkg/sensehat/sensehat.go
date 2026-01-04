@@ -804,11 +804,17 @@ func (s *SenseHat) SetNavLights() error {
 
 // FlashStrobes double-flashes the strobe lights on top row (SD card side).
 // Top row is y=7. Strobes at corners: (0,7) left, (7,7) right.
-// Restores nav lights after flashing.
+// Keeps nav lights on throughout the flash sequence.
 func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 	for flash := 0; flash < 2; flash++ {
-		// Flash on
+		// Flash on (strobes + nav lights)
 		if err := s.SetPixel(0, 7, 255, 255, 255); err != nil { // Left strobe (x=0, y=7)
+			return err
+		}
+		if err := s.SetPixel(1, 7, 0, 255, 0); err != nil { // Green nav (x=1, y=7)
+			return err
+		}
+		if err := s.SetPixel(6, 7, 255, 0, 0); err != nil { // Red nav (x=6, y=7)
 			return err
 		}
 		if err := s.SetPixel(7, 7, 255, 255, 255); err != nil { // Right strobe (x=7, y=7)
@@ -817,8 +823,14 @@ func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 
 		time.Sleep(duration)
 
-		// Flash off
+		// Flash off (strobes only, keep nav lights)
 		if err := s.SetPixel(0, 7, 0, 0, 0); err != nil {
+			return err
+		}
+		if err := s.SetPixel(1, 7, 0, 255, 0); err != nil { // Keep green nav on
+			return err
+		}
+		if err := s.SetPixel(6, 7, 255, 0, 0); err != nil { // Keep red nav on
 			return err
 		}
 		if err := s.SetPixel(7, 7, 0, 0, 0); err != nil {
@@ -829,8 +841,7 @@ func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 			time.Sleep(duration / 2)
 		}
 	}
-	// Restore nav lights after strobes finish
-	return s.SetNavLights()
+	return nil
 }
 
 // PlaneAnimation animates a plane flying across the LED matrix with nav lights.
