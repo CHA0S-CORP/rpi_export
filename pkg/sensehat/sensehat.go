@@ -713,28 +713,28 @@ func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) err
 	return s.SetPixel(x, y, 0, 0, 0)
 }
 
-// SetNavLights turns on the navigation lights (red port, green starboard) on the top row.
+// SetNavLights turns on the navigation lights (red port, green starboard) on the GPIO row ends.
 func (s *SenseHat) SetNavLights() error {
-	if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - port (left)
+	if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - port (left end of GPIO row)
 		return err
 	}
-	return s.SetPixel(7, 0, 0, 255, 0) // Green - starboard (right)
+	return s.SetPixel(0, 7, 0, 255, 0) // Green - starboard (right end of GPIO row)
 }
 
-// FlashStrobes double-flashes the strobe lights on the bottom corners (0,7) and (7,7).
+// FlashStrobes double-flashes the strobe lights on the far row ends.
 func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 	// Double flash pattern
 	for flash := 0; flash < 2; flash++ {
-		// Flash on - bottom left corner
-		s.SetPixel(0, 7, 255, 255, 255)
-		// Flash on - bottom right corner
+		// Flash on - far row left end
+		s.SetPixel(7, 0, 255, 255, 255)
+		// Flash on - far row right end
 		s.SetPixel(7, 7, 255, 255, 255)
 
 		time.Sleep(duration)
 
-		// Flash off - bottom left corner
-		s.SetPixel(0, 7, 0, 0, 0)
-		// Flash off - bottom right corner
+		// Flash off - far row left end
+		s.SetPixel(7, 0, 0, 0, 0)
+		// Flash off - far row right end
 		s.SetPixel(7, 7, 0, 0, 0)
 
 		if flash == 0 {
@@ -775,21 +775,21 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 			}
 		}
 
-		// Navigation lights: red on left (port), green on right (starboard) - top row
-		if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - port (left)
+		// Navigation lights: red/green on GPIO row ends (steady)
+		if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - port
 			return err
 		}
-		if err := s.SetPixel(7, 0, 0, 255, 0); err != nil { // Green - starboard (right)
+		if err := s.SetPixel(0, 7, 0, 255, 0); err != nil { // Green - starboard
 			return err
 		}
 
-		// Strobe lights: white double-flashing every 4 frames - bottom corners
+		// Strobe lights: white flashing on far row ends
 		strobeOn := (strobeCounter % 4) < 2
 		if strobeOn {
-			if err := s.SetPixel(0, 7, 255, 255, 255); err != nil { // White strobe bottom-left
+			if err := s.SetPixel(7, 0, 255, 255, 255); err != nil { // White strobe
 				return err
 			}
-			if err := s.SetPixel(7, 7, 255, 255, 255); err != nil { // White strobe bottom-right
+			if err := s.SetPixel(7, 7, 255, 255, 255); err != nil { // White strobe
 				return err
 			}
 		}
