@@ -739,7 +739,7 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 	textWidth := xOffset - spacing
 
 	// Scroll text from right to left with airplane nav lights
-	strobeOn := false
+	strobeCounter := 0
 	for scroll := 0; scroll <= textWidth+8; scroll++ {
 		if err := s.ClearLEDs(); err != nil {
 			return err
@@ -765,7 +765,8 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 			return err
 		}
 
-		// Strobe lights: white flashing adjacent to nav lights
+		// Strobe lights: white flashing every 4 frames (slower flash)
+		strobeOn := (strobeCounter % 4) < 2
 		if strobeOn {
 			if err := s.SetPixel(1, 7, 255, 255, 255); err != nil { // White strobe near red
 				return err
@@ -774,7 +775,7 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 				return err
 			}
 		}
-		strobeOn = !strobeOn
+		strobeCounter++
 
 		time.Sleep(frameDelay)
 	}
