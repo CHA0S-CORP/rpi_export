@@ -712,8 +712,73 @@ func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) err
 	return s.SetPixel(x, y, 0, 0, 0)
 }
 
-// PlaneAnimation animates a plane flying across the LED matrix from left to right.
+// PlaneAnimation animates "SKYSPY" text scrolling followed by a plane flying across the LED matrix.
 func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
+	// 5x5 font for SKYSPY (each letter is 5 columns wide)
+	letters := map[rune][][2]int{
+		'S': {{0, 1}, {0, 2}, {0, 3}, {0, 4}, {1, 0}, {1, 4}, {2, 0}, {2, 2}, {2, 4}, {3, 0}, {3, 4}, {4, 0}, {4, 1}, {4, 2}, {4, 4}},
+		'K': {{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {1, 2}, {2, 1}, {2, 3}, {3, 0}, {3, 4}},
+		'Y': {{0, 0}, {0, 1}, {1, 2}, {2, 2}, {2, 3}, {2, 4}, {3, 2}, {4, 0}, {4, 1}},
+		'P': {{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {1, 0}, {1, 2}, {2, 0}, {2, 2}, {3, 0}, {3, 1}, {3, 2}},
+	}
+
+	// Build "SKYSPY" as a bitmap with 1 column spacing between letters
+	text := "SKYSPY"
+	letterWidth := 5
+	spacing := 1
+	var textPixels [][2]int
+	xOffset := 0
+	for _, ch := range text {
+		if pixels, ok := letters[ch]; ok {
+			for _, p := range pixels {
+				textPixels = append(textPixels, [2]int{p[0] + xOffset, p[1]})
+			}
+		}
+		xOffset += letterWidth + spacing
+	}
+	textWidth := xOffset - spacing
+
+	// Scroll text from right to left with airplane nav lights
+	strobeOn := false
+	for scroll := 0; scroll <= textWidth+8; scroll++ {
+		if err := s.ClearLEDs(); err != nil {
+			return err
+		}
+
+		// Draw scrolling text
+		for _, p := range textPixels {
+			px := 7 - scroll + p[0]
+			py := 1 + p[1] // Center vertically
+			if px >= 0 && px <= 7 && py >= 0 && py <= 7 {
+				if err := s.SetPixel(px, py, 0, 200, 255); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Navigation lights: green on right (starboard), red on left (port)
+		// Bottom row: positions 0 and 7
+		if err := s.SetPixel(0, 7, 255, 0, 0); err != nil { // Red - port (left)
+			return err
+		}
+		if err := s.SetPixel(7, 7, 0, 255, 0); err != nil { // Green - starboard (right)
+			return err
+		}
+
+		// Strobe lights: white flashing adjacent to nav lights
+		if strobeOn {
+			if err := s.SetPixel(1, 7, 255, 255, 255); err != nil { // White strobe near red
+				return err
+			}
+			if err := s.SetPixel(6, 7, 255, 255, 255); err != nil { // White strobe near green
+				return err
+			}
+		}
+		strobeOn = !strobeOn
+
+		time.Sleep(frameDelay)
+	}
+
 	// Plane shape (relative pixels from nose position)
 	// Shape:   >=>
 	//           =
@@ -727,7 +792,6 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 
 	// Animate plane flying from left (-2) to right (9) to fully exit
 	for x := -2; x <= 9; x++ {
-		// Clear the matrix
 		if err := s.ClearLEDs(); err != nil {
 			return err
 		}

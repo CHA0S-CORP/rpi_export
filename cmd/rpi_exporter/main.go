@@ -103,7 +103,7 @@ func main() {
 				http.Error(w, "Sense HAT not available", http.StatusServiceUnavailable)
 				return
 			}
-			go hat.PlaneAnimation(80 * time.Millisecond)
+			go hat.PlaneAnimation(120 * time.Millisecond)
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("ok\n"))
