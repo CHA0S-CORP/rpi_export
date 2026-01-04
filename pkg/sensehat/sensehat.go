@@ -804,6 +804,7 @@ func (s *SenseHat) SetNavLights() error {
 
 // FlashStrobes double-flashes the strobe lights on top row (SD card side).
 // Top row is y=7. Strobes at corners: (0,7) left, (7,7) right.
+// Restores nav lights after flashing.
 func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 	for flash := 0; flash < 2; flash++ {
 		// Flash on
@@ -828,7 +829,8 @@ func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 			time.Sleep(duration / 2)
 		}
 	}
-	return nil
+	// Restore nav lights after strobes finish
+	return s.SetNavLights()
 }
 
 // PlaneAnimation animates a plane flying across the LED matrix with nav lights.
