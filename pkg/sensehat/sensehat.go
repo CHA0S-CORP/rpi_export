@@ -690,14 +690,15 @@ func (s *SenseHat) SetPixel(x, y int, r, g, b uint8) error {
 	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
 		return err
 	}
-	// Each pixel is 3 bytes (RBG order for ATTINY88), scaled from 0-255 to 0-31
-	// The LED matrix is laid out with x as rows (closest to GPIO = x=0)
-	offset := (x*8 + y) * 3
+	// Pixel offset in framebuffer: row-major order, 3 bytes per pixel (RGB)
+	// y = row (0 = closest to GPIO), x = column
+	offset := (y*8 + x) * 3
+	// Write register address followed by RGB values (scaled to 0-31)
 	buf := []byte{
 		byte(offset),
 		r >> 3,
-		b >> 3,
 		g >> 3,
+		b >> 3,
 	}
 	_, err := s.i2cFile.Write(buf)
 	return err
@@ -713,28 +714,27 @@ func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) err
 	return s.SetPixel(x, y, 0, 0, 0)
 }
 
-// SetNavLights turns on the navigation lights (red port, green starboard) on the GPIO row ends.
+// SetNavLights turns on the navigation lights on the row closest to GPIO (y=0).
+// Red on left (x=0), Green on right (x=7).
 func (s *SenseHat) SetNavLights() error {
-	if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - port (left end of GPIO row)
+	if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - left
 		return err
 	}
-	return s.SetPixel(0, 7, 0, 255, 0) // Green - starboard (right end of GPIO row)
+	return s.SetPixel(7, 0, 0, 255, 0) // Green - right
 }
 
-// FlashStrobes double-flashes the strobe lights on the far row ends.
+// FlashStrobes double-flashes the strobe lights on the row farthest from GPIO (y=7).
 func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 	// Double flash pattern
 	for flash := 0; flash < 2; flash++ {
-		// Flash on - far row left end
-		s.SetPixel(7, 0, 255, 255, 255)
-		// Flash on - far row right end
+		// Flash on - far row corners
+		s.SetPixel(0, 7, 255, 255, 255)
 		s.SetPixel(7, 7, 255, 255, 255)
 
 		time.Sleep(duration)
 
-		// Flash off - far row left end
-		s.SetPixel(7, 0, 0, 0, 0)
-		// Flash off - far row right end
+		// Flash off
+		s.SetPixel(0, 7, 0, 0, 0)
 		s.SetPixel(7, 7, 0, 0, 0)
 
 		if flash == 0 {
@@ -775,21 +775,21 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 			}
 		}
 
-		// Navigation lights: red/green on GPIO row ends (steady)
-		if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - port
+		// Navigation lights: red/green on GPIO row (y=0)
+		if err := s.SetPixel(0, 0, 255, 0, 0); err != nil { // Red - left
 			return err
 		}
-		if err := s.SetPixel(0, 7, 0, 255, 0); err != nil { // Green - starboard
+		if err := s.SetPixel(7, 0, 0, 255, 0); err != nil { // Green - right
 			return err
 		}
 
-		// Strobe lights: white flashing on far row ends
+		// Strobe lights: white flashing on far row (y=7)
 		strobeOn := (strobeCounter % 4) < 2
 		if strobeOn {
-			if err := s.SetPixel(7, 0, 255, 255, 255); err != nil { // White strobe
+			if err := s.SetPixel(0, 7, 255, 255, 255); err != nil { // White strobe left
 				return err
 			}
-			if err := s.SetPixel(7, 7, 255, 255, 255); err != nil { // White strobe
+			if err := s.SetPixel(7, 7, 255, 255, 255); err != nil { // White strobe right
 				return err
 			}
 		}
