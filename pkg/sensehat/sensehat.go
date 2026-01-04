@@ -50,12 +50,13 @@ import (
 
 // I2C addresses for Sense HAT sensors
 const (
-	addrAccelGyro = 0x6A // LSM9DS1 Accelerometer and Gyroscope
-	addrMag       = 0x1C // LSM9DS1 Magnetometer
-	addrHTS221    = 0x5F // Humidity and temperature
-	addrLPS25H    = 0x5C // Pressure and temperature
-	addrTCS34725  = 0x29 // Color sensor (Sense HAT v2 only)
-	addrLEDMatrix = 0x46 // LED matrix controller
+	addrAccelGyro    = 0x6A // LSM9DS1 Accelerometer and Gyroscope
+	addrMag          = 0x1C // LSM9DS1 Magnetometer
+	addrHTS221       = 0x5F // Humidity and temperature
+	addrLPS25H       = 0x5C // Pressure and temperature
+	addrTCS34725     = 0x29 // Color sensor TCS34725 (Sense HAT v2 - space station variant)
+	addrTCS3400      = 0x39 // Color sensor TCS3400 (Sense HAT v2 - retail variant)
+	addrLEDMatrix    = 0x46 // LED matrix controller
 )
 
 // I2C ioctl commands
@@ -78,6 +79,7 @@ const (
 type SenseHat struct {
 	i2cFile        *os.File
 	hasColorSensor bool
+	colorSensorAddr uint8 // I2C address of detected color sensor (0x29 or 0x39)
 	joystickFile   *os.File
 	joystickEvents []JoystickEvent
 	joystickMu     sync.Mutex
@@ -142,7 +144,7 @@ func New() (*SenseHat, error) {
 	}
 
 	// Try to initialize color sensor (Sense HAT v2 only)
-	hat.hasColorSensor = hat.initTCS34725() == nil
+	hat.hasColorSensor = hat.initColorSensor() == nil
 
 	// Initialize joystick
 	hat.initJoystick()
@@ -332,31 +334,46 @@ func (s *SenseHat) initIMU() error {
 	return nil
 }
 
-// initTCS34725 initializes the TCS34725 color sensor (Sense HAT v2 only).
-func (s *SenseHat) initTCS34725() error {
-	// Check device ID (command bit 0x80 | register)
-	id, err := s.readReg(addrTCS34725, 0x80|0x12)
-	if err != nil {
-		return err
-	}
-	if id != 0x44 && id != 0x4D { // TCS34725 or TCS3400
-		return fmt.Errorf("unknown color sensor ID: 0x%02X", id)
+// initColorSensor initializes the color sensor (Sense HAT v2 only).
+// Supports both TCS34725 (space station variant at 0x29) and TCS3400 (retail variant at 0x39).
+func (s *SenseHat) initColorSensor() error {
+	// Try both possible addresses for the color sensor
+	addrs := []uint8{addrTCS34725, addrTCS3400}
+
+	for _, addr := range addrs {
+		// Check device ID (command bit 0x80 | register 0x12)
+		id, err := s.readReg(addr, 0x80|0x12)
+		if err != nil {
+			continue // Try next address
+		}
+
+		// Valid device IDs:
+		// - 0x44, 0x4D: TCS34725 variants
+		// - 0x90, 0x93: TCS3400 variants (TCS34001/TCS34005 and TCS34003/TCS34007)
+		if id != 0x44 && id != 0x4D && id != 0x90 && id != 0x93 {
+			continue // Unknown ID, try next address
+		}
+
+		// Found a valid color sensor, configure it
+		s.colorSensorAddr = addr
+
+		// Enable device with AEN and PON (command bit | register)
+		if err := s.writeReg(addr, 0x80|0x00, 0x03); err != nil {
+			return err
+		}
+		// Set integration time (64 cycles ≈ 154ms)
+		if err := s.writeReg(addr, 0x80|0x01, 0xC0); err != nil {
+			return err
+		}
+		// Set gain (4x)
+		if err := s.writeReg(addr, 0x80|0x0F, 0x01); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
-	// Enable device with AEN and PON (command bit | register)
-	if err := s.writeReg(addrTCS34725, 0x80|0x00, 0x03); err != nil {
-		return err
-	}
-	// Set integration time (64 cycles ≈ 154ms)
-	if err := s.writeReg(addrTCS34725, 0x80|0x01, 0xC0); err != nil {
-		return err
-	}
-	// Set gain (4x)
-	if err := s.writeReg(addrTCS34725, 0x80|0x0F, 0x01); err != nil {
-		return err
-	}
-
-	return nil
+	return fmt.Errorf("no color sensor detected at addresses 0x%02X or 0x%02X", addrTCS34725, addrTCS3400)
 }
 
 // initJoystick opens the joystick input device.
@@ -602,7 +619,7 @@ func (s *SenseHat) GetColor() (r, g, b, c uint8, err error) {
 
 	// Read RGBC data starting at CDATAL (0x14)
 	// Note: readRegs already sets the auto-increment bit (0x80)
-	data, err := s.readRegs(addrTCS34725, 0x14, 8)
+	data, err := s.readRegs(s.colorSensorAddr, 0x14, 8)
 	if err != nil {
 		return 0, 0, 0, 0, err
 	}
