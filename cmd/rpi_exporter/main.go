@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"log"
 	"net/http"
@@ -94,6 +95,46 @@ func main() {
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("ready\n"))
+		}))
+
+		// LED control endpoint
+		http.Handle("/led", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if hat == nil {
+				http.Error(w, "Sense HAT not available", http.StatusServiceUnavailable)
+				return
+			}
+
+			switch r.Method {
+			case http.MethodDelete:
+				// Clear all LEDs
+				if err := hat.ClearLEDs(); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+
+			case http.MethodPost:
+				// Set pixel(s)
+				var req struct {
+					X int    `json:"x"`
+					Y int    `json:"y"`
+					R uint8  `json:"r"`
+					G uint8  `json:"g"`
+					B uint8  `json:"b"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				if err := hat.SetPixel(req.X, req.Y, req.R, req.G, req.B); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
 		}))
 
 		log.Printf("Listening on %s", *flagAddr)
