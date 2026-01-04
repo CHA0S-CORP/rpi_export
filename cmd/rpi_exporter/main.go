@@ -41,15 +41,12 @@ func main() {
 				log.Println("Sense HAT initialized")
 				defer hat.Close()
 
-				// Clear LED matrix on startup and set nav lights
+				// Clear LED matrix on startup and start nav lights
 				if err := hat.ClearLEDs(); err != nil {
 					log.Printf("Warning: Failed to clear LEDs: %v", err)
 				}
-				if err := hat.SetNavLights(); err != nil {
-					log.Printf("Warning: Failed to set nav lights: %v", err)
-				} else {
-					log.Println("Nav lights enabled")
-				}
+				hat.StartNavLights()
+				log.Println("Nav lights enabled")
 
 				if hat.HasColorSensor() {
 					log.Println("Color sensor detected (Sense HAT v2)")

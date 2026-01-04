@@ -101,6 +101,7 @@ type SenseHat struct {
 	joystickEvents  []JoystickEvent
 	joystickMu      sync.Mutex
 	joystickDone    chan struct{} // signals joystick goroutine to stop
+	navLightsDone   chan struct{} // signals nav lights goroutine to stop
 
 	// HTS221 calibration coefficients
 	h0RH, h1RH       float64
@@ -177,6 +178,10 @@ func New() (*SenseHat, error) {
 
 // Close releases all resources.
 func (s *SenseHat) Close() error {
+	// Signal nav lights goroutine to stop
+	if s.navLightsDone != nil {
+		close(s.navLightsDone)
+	}
 	// Signal joystick goroutine to stop
 	if s.joystickDone != nil {
 		close(s.joystickDone)
@@ -722,6 +727,8 @@ func (s *SenseHat) initFramebuffer() error {
 				return fmt.Errorf("failed to open framebuffer %s: %w", fbPath, err)
 			}
 			s.fbFile = fb
+			// Initialize gamma table via I2C
+			s.initGamma()
 			return nil
 		}
 	}
@@ -731,10 +738,34 @@ func (s *SenseHat) initFramebuffer() error {
 	fb, err := os.OpenFile("/dev/fb1", os.O_RDWR, 0)
 	if err == nil {
 		s.fbFile = fb
+		// Initialize gamma table via I2C
+		s.initGamma()
 		return nil
 	}
 
 	return fmt.Errorf("Sense HAT framebuffer not found (tried sysfs lookup and /dev/fb1)")
+}
+
+// initGamma writes the gamma lookup table to the LED matrix controller.
+// The ATTINY88 at 0x46 uses registers 0x00-0x1F for the 32-entry gamma table.
+// Without proper gamma values, all LED outputs map to zero (off).
+func (s *SenseHat) initGamma() {
+	// Default gamma table (same as used by rpisense-fb driver)
+	// Maps 5-bit input values (0-31) to 5-bit output values with gamma correction
+	gamma := []byte{
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
+		0x02, 0x02, 0x03, 0x03, 0x04, 0x05, 0x06, 0x07,
+		0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0E, 0x0F, 0x11,
+		0x12, 0x14, 0x15, 0x17, 0x19, 0x1B, 0x1D, 0x1F,
+	}
+
+	// Write gamma table to ATTINY88 starting at register 0x00
+	if err := setI2CAddr(s.i2cFile, addrLEDMatrix); err != nil {
+		return
+	}
+	// Prepend register address (0x00) to gamma data
+	buf := append([]byte{0x00}, gamma...)
+	s.i2cFile.Write(buf)
 }
 
 // ClearLEDs turns off all LEDs on the 8x8 matrix.
@@ -800,6 +831,28 @@ func (s *SenseHat) SetNavLights() error {
 	}
 	// Red (x=6, y=7)
 	return s.SetPixel(6, 7, 255, 0, 0)
+}
+
+// StartNavLights starts a background goroutine that keeps nav lights on.
+// The framebuffer can be cleared by external processes (kernel driver, console blanking),
+// so this periodically refreshes the nav lights to keep them visible.
+func (s *SenseHat) StartNavLights() {
+	if s.fbFile == nil {
+		return
+	}
+	s.navLightsDone = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.navLightsDone:
+				return
+			case <-ticker.C:
+				s.SetNavLights()
+			}
+		}
+	}()
 }
 
 // FlashStrobes double-flashes the strobe lights on top row (SD card side).
