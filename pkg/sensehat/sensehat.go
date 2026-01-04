@@ -720,30 +720,30 @@ func (s *SenseHat) FlashLED(x, y int, r, g, b uint8, duration time.Duration) err
 }
 
 // SetNavLights turns on the navigation lights on top row (SD card side).
-// Top row: x=0, y varies from 0 (left/HDMI) to 7 (right/GPIO)
-// Layout: Strobe(0,0) | Green(0,1) | ---- | Red(0,6) | Strobe(0,7)
+// Top row is y=7 (furthest from GPIO). x=0 is left, x=7 is right.
+// Layout: Strobe(0,7) | Green(1,7) | ---- | Red(6,7) | Strobe(7,7)
 func (s *SenseHat) SetNavLights() error {
-	// Green (x=0, y=1)
-	if err := s.SetPixel(0, 1, 0, 255, 0); err != nil {
+	// Green (x=1, y=7)
+	if err := s.SetPixel(1, 7, 0, 255, 0); err != nil {
 		return err
 	}
-	// Red (x=0, y=6)
-	return s.SetPixel(0, 6, 255, 0, 0)
+	// Red (x=6, y=7)
+	return s.SetPixel(6, 7, 255, 0, 0)
 }
 
 // FlashStrobes double-flashes the strobe lights on top row (SD card side).
-// Top row: x=0, y=0 (left corner), y=7 (right corner)
+// Top row is y=7. Strobes at corners: (0,7) left, (7,7) right.
 func (s *SenseHat) FlashStrobes(duration time.Duration) error {
 	for flash := 0; flash < 2; flash++ {
 		// Flash on
-		s.SetPixel(0, 0, 255, 255, 255) // Left strobe (x=0, y=0)
-		s.SetPixel(0, 7, 255, 255, 255) // Right strobe (x=0, y=7)
+		s.SetPixel(0, 7, 255, 255, 255) // Left strobe (x=0, y=7)
+		s.SetPixel(7, 7, 255, 255, 255) // Right strobe (x=7, y=7)
 
 		time.Sleep(duration)
 
 		// Flash off
-		s.SetPixel(0, 0, 0, 0, 0)
 		s.SetPixel(0, 7, 0, 0, 0)
+		s.SetPixel(7, 7, 0, 0, 0)
 
 		if flash == 0 {
 			time.Sleep(duration / 2)
@@ -783,22 +783,22 @@ func (s *SenseHat) PlaneAnimation(frameDelay time.Duration) error {
 			}
 		}
 
-		// Navigation lights - all on top row (x=0)
-		// Strobe(0,0) | Green(0,1) | ---- | Red(0,6) | Strobe(0,7)
-		if err := s.SetPixel(0, 1, 0, 255, 0); err != nil { // Green
+		// Navigation lights - all on top row (y=7)
+		// Strobe(0,7) | Green(1,7) | ---- | Red(6,7) | Strobe(7,7)
+		if err := s.SetPixel(1, 7, 0, 255, 0); err != nil { // Green
 			return err
 		}
-		if err := s.SetPixel(0, 6, 255, 0, 0); err != nil { // Red
+		if err := s.SetPixel(6, 7, 255, 0, 0); err != nil { // Red
 			return err
 		}
 
 		// Strobe lights at corners of top row
 		strobeOn := (strobeCounter % 4) < 2
 		if strobeOn {
-			if err := s.SetPixel(0, 0, 255, 255, 255); err != nil { // Left strobe
+			if err := s.SetPixel(0, 7, 255, 255, 255); err != nil { // Left strobe
 				return err
 			}
-			if err := s.SetPixel(0, 7, 255, 255, 255); err != nil { // Right strobe
+			if err := s.SetPixel(7, 7, 255, 255, 255); err != nil { // Right strobe
 				return err
 			}
 		}
